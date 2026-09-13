@@ -9,8 +9,7 @@
 [Mm]emoryCaptures/
 [Rr]ecordings/
 
-# Never ignore Asset meta data
-!/[Aa]ssets/**/*.meta
+# 注意：本项目会提交 .meta 文件（VPM 包要求固定 GUID），不要忽略它们
 
 # Visual Studio / Rider / VS Code
 .vs/
