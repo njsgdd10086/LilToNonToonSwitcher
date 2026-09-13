@@ -86,6 +86,12 @@ namespace NonToonSwitcher
         public string OutputFolder;
         public GameObject SwitchObject;
 
+        /// <summary>true 表示复用了同一个 avatar 下已有的切换对象，没有新建。</summary>
+        public bool SwitchReused;
+
+        /// <summary>切换对象里累计的条目数（复用时会累加）。</summary>
+        public int SwitchEntryCount;
+
         public bool Success { get { return Errors.Count == 0; } }
 
         public void Warn(string message) { if (!string.IsNullOrEmpty(message)) Warnings.Add(message); }
@@ -97,7 +103,12 @@ namespace NonToonSwitcher
             sb.AppendLine("LilToNonToon Switcher");
             sb.AppendLine("输出文件夹  : " + OutputFolder);
             sb.AppendLine("已转换材质  : " + Logs.Count + " 个");
-            if (SwitchObject != null) sb.AppendLine("切换对象    : " + SwitchObject.name);
+            if (SwitchObject != null)
+            {
+                sb.AppendLine(SwitchReused
+                    ? "切换对象    : " + SwitchObject.name + "（复用已有开关，本次新增 " + SwitchEntryCount + " 条）"
+                    : "切换对象    : " + SwitchObject.name + "（新建，共 " + SwitchEntryCount + " 条）");
+            }
             sb.AppendLine();
 
             foreach (var error in Errors) sb.AppendLine("[错误] " + error);

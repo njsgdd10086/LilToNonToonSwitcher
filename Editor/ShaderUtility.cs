@@ -358,6 +358,34 @@ namespace NonToonSwitcher
             return true;
         }
 
+        /// <summary>
+        /// Creates an asset folder including every missing parent ("Assets/A/B/C" works even when nothing
+        /// below Assets exists yet). Returns false when the path is outside of Assets or cannot be created.
+        /// </summary>
+        public static bool TryCreateFolderRecursive(string folder)
+        {
+            if (string.IsNullOrEmpty(folder)) return false;
+            folder = ToAssetPath(folder).Replace('\\', '/').TrimEnd('/');
+            if (folder == "Assets") return true;
+            if (!folder.StartsWith("Assets/", StringComparison.Ordinal)) return false;
+            if (AssetDatabase.IsValidFolder(folder)) return true;
+
+            var parts = folder.Split('/');
+            var current = parts[0];
+            for (var i = 1; i < parts.Length; i++)
+            {
+                if (string.IsNullOrEmpty(parts[i])) continue;
+                var next = current + "/" + parts[i];
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    var created = AssetDatabase.CreateFolder(current, parts[i]);
+                    if (string.IsNullOrEmpty(created)) return false;
+                }
+                current = next;
+            }
+            return AssetDatabase.IsValidFolder(folder);
+        }
+
         public static string SanitizeFileName(string name)
         {
             if (string.IsNullOrEmpty(name)) return "Material";

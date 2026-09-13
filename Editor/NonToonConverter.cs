@@ -110,6 +110,9 @@ namespace NonToonSwitcher
         /// <summary>Suffix appended to converted material names, e.g. "衣服" -> "衣服_nontoon.mat".</summary>
         public const string OutputSuffix = "_nontoon";
 
+        /// <summary>切换对象的固定名字，用于在同一个 avatar 下复用。</summary>
+        public const string SwitcherObjectName = "_NonToonSwitch";
+
         /// <summary>
         /// File name of the converted material: "&lt;original name&gt;_nontoon.mat".
         /// An existing suffix is not duplicated.
@@ -565,19 +568,15 @@ namespace NonToonSwitcher
                 return result;
             }
 
-            // 2. make sure the output folder exists
+            // 2. make sure the output folder exists（连同所有缺失的父级一起创建）
             var folder = ShaderUtility.ToAssetPath(request.OutputFolder).TrimEnd('/');
             if (!AssetDatabase.IsValidFolder(folder))
             {
-                var parent = Path.GetDirectoryName(folder);
-                if (string.IsNullOrEmpty(parent)) parent = "Assets";
-                parent = parent.Replace('\\', '/');
-                if (!AssetDatabase.IsValidFolder(parent))
+                if (!ShaderUtility.TryCreateFolderRecursive(folder))
                 {
-                    result.Error("输出文件夹 " + folder + " 不存在，且找不到它的上级目录。");
+                    result.Error("无法创建输出文件夹 " + folder + "。请确认它位于 Assets 目录下。");
                     return result;
                 }
-                AssetDatabase.CreateFolder(parent, Path.GetFileName(folder));
             }
 
             // Phase 1: create / update the NonToon materials. Asset paths are decided up front so that two
@@ -656,10 +655,41 @@ namespace NonToonSwitcher
 
                 var parent = FindSwitcherParent(request.Targets);
                 var swapRoot = FindSwapRoot(request.Targets);
-                var switcher = NonToonSwitcherBuilder.Build(parent, swapRoot, pairs,
-                    request.CreateMenuToggle, request.MenuParameter, request.MenuLabel,
-                    request.NonToonOnByDefault, request.SwitcherMode, result);
-                if (switcher != null && parent != null) EditorUtility.SetDirty(parent);
+
+                // 同一个 avatar 下已经转换过一次时，把新材质追加到已有的开关里，
+                // 而不是再建一个（否则转几次就会出现几个开关）。
+                var reused = false;
+                var existing = FindExistingSwitcher(request.Targets, parent);
+                if (existing != null && request.SwitcherMode == SwitcherMode.MaterialSetter)
+                {
+                    var added = NonToonSwitcherBuilder.AppendToMaterialSetter(existing, pairs,
+                        request.CreateMenuToggle, request.MenuParameter, result);
+                    if (added >= 0)
+                    {
+                        result.SwitchObject = existing;
+                        result.SwitchReused = true;
+                        result.SwitchEntryCount = added;
+                        if (existing.transform.parent != null) EditorUtility.SetDirty(existing.transform.parent);
+                        EditorUtility.SetDirty(existing);
+                        reused = true;
+                    }
+                    else
+                    {
+                        result.Warnings.RemoveAll(w => w.Contains("已改为新建"));
+                    }
+                }
+
+                if (!reused)
+                {
+                    var switcher = NonToonSwitcherBuilder.Build(parent, swapRoot, pairs,
+                        request.CreateMenuToggle, request.MenuParameter, request.MenuLabel,
+                        request.NonToonOnByDefault, request.SwitcherMode, result);
+                    if (switcher != null)
+                    {
+                        result.SwitchEntryCount = pairs.Count;
+                        if (parent != null) EditorUtility.SetDirty(parent);
+                    }
+                }
             }
 
             foreach (var target in request.Targets)
@@ -789,10 +819,55 @@ namespace NonToonSwitcher
             }
             if (common == null) return null;
 
-            // MA needs the menu installer inside the avatar; moving up to the avatar root is fine because
-            // MA Material Swap's Root reference limits which renderers are affected.
+            // 放在 avatar 根节点下：MA 的菜单安装器需要位于 avatar 内部，而 Material Setter 是按对象
+            // 逐条记录的，放在根节点不会扩大作用范围。
             var avatarRoot = FindAvatarRoot(common);
-            return avatarRoot != null ? avatarRoot : common.transform.parent != null ? common.transform.parent.gameObject : common;
+            if (avatarRoot != null) return avatarRoot;
+
+            // 没有 avatar 时不要把开关塞进选中对象内部：挂到公共祖先的父级（或场景根），
+            // 这样即使之后再转同一个模型的其他部分，也能找到并复用同一个开关。
+            var parent = common.transform.parent;
+            return parent != null ? parent.gameObject : null;
+        }
+
+        /// <summary>
+        /// 查找同一个 avatar 下已经存在的切换对象，避免每转换一次就新建一个开关。
+        /// </summary>
+        private static GameObject FindExistingSwitcher(GameObject[] targets, GameObject parent)
+        {
+            var avatarRoot = parent != null ? FindAvatarRoot(parent) : null;
+
+            // 优先找同一 avatar 下的
+            if (avatarRoot != null)
+            {
+                foreach (var child in avatarRoot.GetComponentsInChildren<Transform>(true))
+                {
+                    if (child != null && child.name == SwitcherObjectName) return child.gameObject;
+                }
+            }
+
+            // 没有 avatar 时，在同一个父节点（或同一场景的根节点）下找
+            if (parent != null)
+            {
+                for (var i = 0; i < parent.transform.childCount; i++)
+                {
+                    var child = parent.transform.GetChild(i);
+                    if (child != null && child.name == SwitcherObjectName) return child.gameObject;
+                }
+                return null;
+            }
+
+            var targets2 = targets ?? new GameObject[0];
+            var scene = targets2.Length > 0 && targets2[0] != null
+                ? targets2[0].scene
+                : UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (!scene.IsValid()) return null;
+
+            foreach (var root in scene.GetRootGameObjects())
+            {
+                if (root != null && root.name == SwitcherObjectName) return root;
+            }
+            return null;
         }
 
         /// <summary>The renderers below this object are the ones the material swap touches.</summary>

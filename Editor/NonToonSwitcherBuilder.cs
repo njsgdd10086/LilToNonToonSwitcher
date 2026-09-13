@@ -174,23 +174,8 @@ namespace NonToonSwitcher
                 return false;
             }
 
-            var added = 0;
-            foreach (var pair in pairs)
-            {
-                if (pair.Renderer == null || pair.Converted == null) continue;
-
-                var reference = Activator.CreateInstance(referenceType);
-                var setMethod = referenceType.GetMethod("Set", new[] { typeof(GameObject) });
-                if (setMethod != null) setMethod.Invoke(reference, new object[] { pair.Renderer.gameObject });
-
-                var entry = Activator.CreateInstance(entryType);
-                objectField.SetValue(entry, reference);
-                materialField.SetValue(entry, pair.Converted);
-                indexField.SetValue(entry, pair.MaterialIndex);
-                list.Add(entry);
-                added++;
-            }
-
+            var added = AddSetterEntries(list, entryType, objectField, materialField, indexField,
+                referenceType, pairs);
             if (added == 0)
             {
                 result.Error("没有任何 Renderer 材质槽可以写成 MA Material Setter 的条目。");
@@ -205,6 +190,142 @@ namespace NonToonSwitcher
 
             EditorUtility.SetDirty(component);
             return true;
+        }
+
+        /// <summary>
+        /// 把新的材质追加到已有的 MA Material Setter 上（同一个 avatar 重复转换时复用开关）。
+        /// 返回真正新增的条目数；已存在的条目会被跳过。
+        /// </summary>
+        public static int AppendToMaterialSetter(GameObject host, IList<SwitchPair> pairs,
+            bool ensureMenuToggle, string menuParameter, ConversionResult result)
+        {
+            if (host == null || pairs == null || pairs.Count == 0) return 0;
+
+            var setterType = FindType(MaterialSetterTypeName);
+            var component = setterType != null ? host.GetComponent(setterType) : null;
+            if (component == null)
+            {
+                result.Warn("已有切换对象 " + host.name + " 上没有 MA Material Setter，无法追加条目，已改为新建。" );
+                return -1;
+            }
+
+            var objectsProperty = setterType.GetProperty("Objects", BindingFlags.Public | BindingFlags.Instance);
+            var list = objectsProperty != null ? objectsProperty.GetValue(component, null) as IList : null;
+            if (list == null)
+            {
+                result.Error("当前 Modular Avatar 版本的 MA Material Setter 没有 Objects 列表。");
+                return -1;
+            }
+
+            var entryType = FindType(MaterialSwitchObjectTypeName)
+                            ?? (objectsProperty.PropertyType.IsGenericType
+                                ? objectsProperty.PropertyType.GetGenericArguments()[0]
+                                : null);
+            var referenceType = FindType(ObjectReferenceTypeName);
+            if (entryType == null || referenceType == null)
+            {
+                result.Error("无法解析 MA Material Setter 的条目类型。");
+                return -1;
+            }
+
+            var objectField = entryType.GetField("Object", BindingFlags.Public | BindingFlags.Instance);
+            var materialField = entryType.GetField("Material", BindingFlags.Public | BindingFlags.Instance);
+            var indexField = entryType.GetField("MaterialIndex", BindingFlags.Public | BindingFlags.Instance);
+            if (objectField == null || materialField == null || indexField == null)
+            {
+                result.Error("无法解析 MA Material Setter 的条目字段。");
+                return -1;
+            }
+
+            // 已有的条目（对象 + 槽位）不再重复添加
+            var existing = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in list)
+            {
+                if (entry == null) continue;
+                if (!TryDescribeEntry(entry, objectField, indexField, component, out var key)) continue;
+                existing.Add(key);
+            }
+
+            var pending = new List<SwitchPair>();
+            var skipped = 0;
+            foreach (var pair in pairs)
+            {
+                if (pair.Renderer == null || pair.Converted == null) continue;
+                var key = pair.Renderer.GetInstanceID() + ":" + pair.MaterialIndex;
+                if (existing.Contains(key)) { skipped++; continue; }
+                existing.Add(key);
+                pending.Add(pair);
+            }
+
+            var added = AddSetterEntries(list, entryType, objectField, materialField, indexField, referenceType, pending);
+            if (ensureMenuToggle) EnsureMenuToggle(host, menuParameter, result);
+
+            if (added == 0 && skipped > 0)
+                result.Warn("这些 Renderer 的材质槽已经在开关里了，本次没有新增条目。");
+
+            EditorUtility.SetDirty(component);
+            return added;
+        }
+
+        /// <summary>把条目解析成 "rendererInstanceId:slot" 形式的键，用于去重。</summary>
+        private static bool TryDescribeEntry(object entry, FieldInfo objectField, FieldInfo indexField,
+            Component container, out string key)
+        {
+            key = null;
+            try
+            {
+                var reference = objectField.GetValue(entry);
+                var index = (int)indexField.GetValue(entry);
+                var getMethod = reference != null ? reference.GetType().GetMethod("Get", new[] { typeof(Component) }) : null;
+                var target = getMethod != null ? getMethod.Invoke(reference, new object[] { container }) as GameObject : null;
+                if (target == null) return false;
+                key = target.GetInstanceID() + ":" + index;
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>按 SwitchPair 列表生成 MA Material Setter 的条目。</summary>
+        private static int AddSetterEntries(IList list, Type entryType, FieldInfo objectField,
+            FieldInfo materialField, FieldInfo indexField, Type referenceType, IList<SwitchPair> pairs)
+        {
+            var setMethod = referenceType.GetMethod("Set", new[] { typeof(GameObject) });
+            var added = 0;
+            foreach (var pair in pairs)
+            {
+                if (pair.Renderer == null || pair.Converted == null) continue;
+
+                var reference = Activator.CreateInstance(referenceType);
+                if (setMethod != null) setMethod.Invoke(reference, new object[] { pair.Renderer.gameObject });
+
+                var entry = Activator.CreateInstance(entryType);
+                objectField.SetValue(entry, reference);
+                materialField.SetValue(entry, pair.Converted);
+                indexField.SetValue(entry, pair.MaterialIndex);
+                list.Add(entry);
+                added++;
+            }
+            return added;
+        }
+
+        /// <summary>确保已有切换对象上挂着菜单开关（同参数名则不重复创建）。</summary>
+        private static void EnsureMenuToggle(GameObject host, string menuParameter, ConversionResult result)
+        {
+            var menuItemType = FindType(MenuItemTypeName);
+            if (menuItemType == null) return;
+
+            foreach (var item in host.GetComponents(menuItemType))
+            {
+                var control = GetMember(item, "PortableControl");
+                if (control == null) continue;
+                var parameter = GetMember(control, "Parameter") as string;
+                if (parameter == menuParameter) return;
+            }
+
+            AddMenuToggle(host, menuParameter, menuParameter, result);
         }
 
         private static bool AddMaterialSwap(GameObject host, GameObject swapRoot, IList<SwitchPair> pairs,
