@@ -72,6 +72,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: 准备 gh-pages 工作目录
         shell: bash
         run: |
@@ -82,19 +84,17 @@ jobs:
           git checkout -q -b gh-pages
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
 
-      - name: 由 Release 资产生成 vpm.json
+      - name: 由 Release 资产生成索引
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api "repos/${{ github.repository }}/releases?per_page=100" > /tmp/releases.json
+          gh api "repos/${{ github.repository }}/releases?per_page=100" > releases.json
           python3 scripts/make_vpm_repo.py \
-            --releases /tmp/releases.json \
+            --releases releases.json \
             --repository "${{ github.repository }}" \
             --output-dir pages
-          echo "=== pages 目录 ==="
-          ls -l pages
           echo "=== vpm.json ==="
           cat pages/vpm.json
 
