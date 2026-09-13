@@ -2,6 +2,15 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.1] - 2026-09-13
+
+### 修复
+
+- 发布流水线：把包校验与 VPM 索引生成抽成 `scripts/` 下的脚本，本地与 CI 共用同一份逻辑
+- 发布流水线：gh-pages 任务改为在仓库根目录运行，修复找不到脚本导致的失败
+- 发布流水线：Release 上传后校验附件确实存在，避免出现「只有标签、没有包」的情况
+- `.meta` 文件统一使用 LF 换行
+
 ## [1.0.0] - 2026-09-13
 
 首个版本。
@@ -25,6 +34,7 @@
 - 转换日志（Console 与窗口）。未支持的功能以警告记录，不会静默丢弃
 - 设置窗口（输出文件夹、开关默认状态、菜单名、各项烘焙开关）
 - `Tools > LilToNonToon Switcher > 导出为 unitypackage`
+- VPM 分发：推送 `v*` 标签自动打包、创建 Release 并更新 VPM 索引
 
 ### 修复
 

@@ -44,26 +44,36 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           ZIP="${{ steps.meta.outputs.zipname }}"
+          VERSION="${{ steps.meta.outputs.version }}"
           TAG="${{ github.ref_name }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
           fi
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          ls -l "$ZIP"
+
+          # 用 API 判断 release 是否存在，避免 gh release view 的返回值影响后续分支
+          if gh api "repos/$REPO/releases/tags/$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，覆盖上传附件"
             gh release upload "$TAG" "$ZIP" --clobber
           else
-            NOTES=".github/RELEASE_NOTES.md"
-            if [ -f "$NOTES" ]; then
-              gh release create "$TAG" "$ZIP" --title "LilToNonToon Switcher ${{ steps.meta.outputs.version }}" --notes-file "$NOTES"
+            echo "创建 Release $TAG"
+            if [ -f ".github/RELEASE_NOTES.md" ]; then
+              gh release create "$TAG" "$ZIP" --title "LilToNonToon Switcher $VERSION" --notes-file ".github/RELEASE_NOTES.md"
             else
-              gh release create "$TAG" "$ZIP" --title "LilToNonToon Switcher ${{ steps.meta.outputs.version }}" --generate-notes
+              gh release create "$TAG" "$ZIP" --title "LilToNonToon Switcher $VERSION" --generate-notes
             fi
           fi
-          echo "Release $TAG 已发布"
+
+          # 确认附件真的挂上去了，否则这一步直接失败
+          ASSETS=$(gh api "repos/$REPO/releases/tags/$TAG" --jq '.assets[].name')
+          echo "Release 附件：$ASSETS"
+          echo "$ASSETS" | grep -qx "$ZIP" || { echo "附件 $ZIP 未上传成功"; exit 1; }
+          echo "Release $TAG 已发布并带附件"
 
   vpm-repo:
     name: 更新 VPM 仓库索引（gh-pages）
