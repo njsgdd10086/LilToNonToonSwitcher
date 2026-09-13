@@ -1,0 +1,80 @@
+name: 校验包结构
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: 检查 Unity 包结构
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 package.json
+        run: |
+          python3 - <<'PY'
+          import json, sys, pathlib
+
+          path = pathlib.Path("package.json")
+          if not path.exists():
+              sys.exit("package.json 不存在")
+
+          data = json.loads(path.read_text(encoding="utf-8"))
+          required = ["name", "version", "displayName", "unity", "license"]
+          missing = [k for k in required if not data.get(k)]
+          if missing:
+              sys.exit("package.json 缺少字段: " + ", ".join(missing))
+
+          print("package.json 正常:", data["name"], data["version"], data["unity"], data["license"])
+          PY
+
+      - name: 校验必要文件
+        run: |
+          missing=0
+          for f in README.md CHANGELOG.md LICENSE package.json Editor; do
+            if [ ! -e "$f" ]; then
+              echo "缺少: $f"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "必要文件齐全"
+
+      - name: 校验 C# 文件为 UTF-8 且括号配对
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys
+
+          files = sorted(pathlib.Path("Editor").glob("*.cs"))
+          if not files:
+              sys.exit("Editor/ 下没有 .cs 文件")
+
+          failed = False
+          for path in files:
+              raw = path.read_bytes()
+              try:
+                  text = raw.decode("utf-8")
+              except UnicodeDecodeError as exc:
+                  print(f"{path}: 不是合法的 UTF-8（{exc}）")
+                  failed = True
+                  continue
+
+              if text.count("{") != text.count("}"):
+                  print(f"{path}: 花括号数量不匹配 {{={text.count('{')} }}={text.count('}')}")
+                  failed = True
+
+          if failed:
+              sys.exit(1)
+          print(f"检查通过，共 {len(files)} 个 C# 文件")
+          PY
+
+      - name: 检查是否误提交个人路径
+        run: |
+          if grep -rInE "deepseek_harness|VRChatCreatorCompanion|AppData" --include="*.cs" --include="*.md" --include="*.json" . ; then
+            echo "发现疑似个人路径，请清理后再提交"
+            exit 1
+          fi
+          echo "未发现个人路径"

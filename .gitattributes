@@ -1,0 +1,25 @@
+# 统一换行符，避免 Windows / macOS 协作时整文件 diff
+* text=auto
+
+# 源码与文档一律 LF
+*.cs      text eol=lf
+*.md      text eol=lf
+*.json    text eol=lf
+*.asmdef  text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+LICENSE   text eol=lf
+
+# 二进制文件不要做换行符转换
+*.unitypackage binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.psd binary
+*.fbx binary
+*.dll binary
+*.pdb binary
+*.scgradients binary
