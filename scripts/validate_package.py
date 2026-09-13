@@ -39,7 +39,8 @@ def main() -> int:
         fail(f"找不到 {manifest}")
 
     try:
-        data = json.loads(manifest.read_text(encoding="utf-8"))
+        # utf-8-sig 兼容带 BOM 的 JSON（例如用 PowerShell 写出来的文件）
+        data = json.loads(manifest.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         fail(f"package.json 不是合法 JSON: {exc}")
 
