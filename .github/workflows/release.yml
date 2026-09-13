@@ -17,48 +17,31 @@ jobs:
   release:
     name: 打包并创建 Release
     runs-on: ubuntu-latest
+    outputs:
+      zipname: ${{ steps.meta.outputs.zipname }}
     steps:
       - uses: actions/checkout@v4
 
       - name: 校验版本与包结构
         id: meta
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os, pathlib, sys
-
-          data = json.loads(pathlib.Path("package.json").read_text(encoding="utf-8"))
-          version = data["version"]
-          name = data["name"]
-          ref = os.environ.get("GITHUB_REF_NAME", "")
-
-          for key in ("name", "version", "displayName", "unity", "license"):
-              if not data.get(key):
-                  sys.exit(f"package.json 缺少 {key}")
-          for path in ("README.md", "LICENSE", "Editor"):
-              if not pathlib.Path(path).exists():
-                  sys.exit(f"缺少 {path}")
-
-          # 标签 v1.0.0 必须与 package.json 的 1.0.0 对应
-          if ref.startswith("v") and ref[1:] != version:
-              sys.exit(f"标签 {ref} 与 package.json 的版本 {version} 不一致")
-
-          print(f"version={version}")
-          print(f"zipname={name}-{version}.zip")
-          print("包结构正常")
-          PY
+        shell: bash
+        run: python3 scripts/validate_package.py --root . --tag "${{ github.ref_name }}" --github-output
 
       - name: 生成 VPM 包压缩包
+        shell: bash
         run: |
           set -euo pipefail
           ZIP="${{ steps.meta.outputs.zipname }}"
           # VPM / VCC 要求 zip 根目录直接是包内容（package.json、Editor/ 等）
-          zip -r -9 "$ZIP" . -x '.git/*' '.github/*' '.gitignore' '.gitattributes' '*.zip'
-          echo "=== 前 15 项 ==="
-          unzip -l "$ZIP" | head -18
+          zip -r -9 "$ZIP" . -x '.git/*' '.github/*' 'scripts/*' '.gitignore' '.gitattributes' '*.zip' '*.unitypackage'
+          echo "=== 前 18 项 ==="
+          unzip -l "$ZIP" | head -20
           unzip -l "$ZIP" | grep -q 'package.json' || { echo "压缩包里没有 package.json"; exit 1; }
           unzip -l "$ZIP" | grep -q 'Editor/NonToonConverter.cs' || { echo "压缩包里缺少源码"; exit 1; }
+          unzip -l "$ZIP" | grep -q 'Editor/NonToonConverter.cs.meta' || { echo "压缩包里缺少 meta"; exit 1; }
 
       - name: 创建 Release 并上传
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -70,17 +53,14 @@ jobs:
           fi
 
           if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，覆盖上传附件"
             gh release upload "$TAG" "$ZIP" --clobber
           else
             NOTES=".github/RELEASE_NOTES.md"
             if [ -f "$NOTES" ]; then
-              gh release create "$TAG" "$ZIP" \
-                --title "LilToNonToon Switcher ${{ steps.meta.outputs.version }}" \
-                --notes-file "$NOTES"
+              gh release create "$TAG" "$ZIP" --title "LilToNonToon Switcher ${{ steps.meta.outputs.version }}" --notes-file "$NOTES"
             else
-              gh release create "$TAG" "$ZIP" \
-                --title "LilToNonToon Switcher ${{ steps.meta.outputs.version }}" \
-                --generate-notes
+              gh release create "$TAG" "$ZIP" --title "LilToNonToon Switcher ${{ steps.meta.outputs.version }}" --generate-notes
             fi
           fi
           echo "Release $TAG 已发布"
@@ -92,8 +72,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: 准备 gh-pages 目录
+      - name: 准备 gh-pages 工作目录
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p pages
           cd pages
           git init -q
@@ -101,58 +83,23 @@ jobs:
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
 
       - name: 由 Release 资产生成 vpm.json
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh api "repos/${{ github.repository }}/releases?per_page=100" > /tmp/releases.json
-
-          python3 - <<'PY'
-          import json, os, pathlib
-
-          repo = os.environ["GITHUB_REPOSITORY"]
-          login, name = repo.split("/")
-          releases = json.loads(pathlib.Path("/tmp/releases.json").read_text(encoding="utf-8"))
-
-          packages = {}
-          for release in releases:
-              if release.get("draft"):
-                  continue
-              for asset in release.get("assets", []):
-                  asset_name = asset["name"]
-                  if not asset_name.endswith(".zip") or "-" not in asset_name[:-4]:
-                      continue
-                  stem = asset_name[:-4]
-                  pkg_name, version = stem.rsplit("-", 1)
-                  packages.setdefault(pkg_name, {"versions": {}})["versions"][version] = {
-                      "name": pkg_name,
-                      "displayName": "LilToNonToon Switcher",
-                      "version": version,
-                      "unity": "2022.3",
-                      "description": "右键把 lilToon 材质一键转换为 NonToon，并自动生成 Modular Avatar 的 MA Material Setter + 菜单开关。",
-                      "url": asset["browser_download_url"],
-                      "repo": f"https://github.com/{repo}",
-                      "author": {"name": "ATRI_NAIXU", "url": f"https://github.com/{login}"},
-                  }
-
-          vpm = {
-              "name": "ATRI_NAIXU VPM Packages",
-              "id": f"com.{login}.vpm-repo",
-              "url": f"https://{login}.github.io/{name}/index.json",
-              "author": {"name": "ATRI_NAIXU", "url": f"https://github.com/{login}"},
-              "packages": packages,
-          }
-          text = json.dumps(vpm, ensure_ascii=False, indent=2) + "\n"
-          # VCC / ALCOM 读取 index.json；vpm.json 作为兼容别名保留
-          pathlib.Path("/tmp/vpm.json").write_text(text, encoding="utf-8")
-          print("包数量:", len(packages), "版本:", [list(v["versions"]) for v in packages.values()])
-          PY
-
-          cp /tmp/vpm.json pages/index.json
-          cp /tmp/vpm.json pages/vpm.json
-          cat pages/index.json
+          python3 scripts/make_vpm_repo.py \
+            --releases /tmp/releases.json \
+            --repository "${{ github.repository }}" \
+            --output-dir pages
+          echo "=== pages 目录 ==="
+          ls -l pages
+          echo "=== vpm.json ==="
+          cat pages/vpm.json
 
       - name: 推送到 gh-pages
+        shell: bash
         run: |
           set -euo pipefail
           cd pages
