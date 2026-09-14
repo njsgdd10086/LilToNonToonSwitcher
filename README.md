@@ -124,8 +124,21 @@ Assets/NonToonConverted/衣服/
 | `GameObject > LilToNonToon > 查看转换日志` | 打开设置窗口并查看日志 |
 | `Tools > LilToNonToon Switcher > 转换选中对象为 NonToon` | Tools 菜单入口 |
 | `Tools > LilToNonToon Switcher > 设置与转换窗口` | 设置窗口 |
+| `Tools > LilToNonToon Switcher > 转换时复用已有的 _NonToonSwitch` | ✅ 打勾＝复用（默认）：同一 avatar 下已存在开关时把新材质追加进去 |
+| `Tools > LilToNonToon Switcher > 转换时总是新建 _NonToonSwitch` | ✅ 打勾＝每次转换都新建一个开关（会产生多个） |
 | `Tools > LilToNonToon Switcher > 环境检查` | 输出 lilToon / NonToon / MA 的安装情况到 Console |
 | `Tools > LilToNonToon Switcher > 导出为 unitypackage` | 源码放在 `Assets/LilToNonToonSwitcher` 时可重新打包 |
+
+### 复用已有的切换对象
+
+默认开启。同一个 avatar 下已经转换过一次时，再次转换**不会**新建 `_NonToonSwitch`，
+而是把新的「对象 + 材质槽」条目**追加**到已有的 MA Material Setter 上，菜单项也不会重复创建。
+
+所以你可以分几次转换同一个模型的不同部位（先转身体、再转头、再转衣服），最终只会有一个开关，
+一次勾选就能整体切换。
+
+菜单里的两项**互斥打勾**，也可以在设置窗口里用复选框切换。
+只有在你确实想把不同部位分成独立开关控制时，才需要关掉它。
 
 ## 四、转换了哪些东西
 

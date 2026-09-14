@@ -18,6 +18,7 @@ namespace NonToonSwitcher
         [SerializeField] private SwitcherMode switcherMode = SwitcherMode.MaterialSetter;
         [SerializeField] private bool createMenuToggle = true;
         [SerializeField] private bool setNonToonOnByDefault = true;
+        [SerializeField] private bool reuseExistingSwitcher = true;
         [SerializeField] private string menuParameterName = "NonToon";
         [SerializeField] private string menuLabel = "NonToon";
         [SerializeField] private bool bakeBaseTexture = true;
@@ -49,6 +50,16 @@ namespace NonToonSwitcher
         {
             get { return setNonToonOnByDefault; }
             set { setNonToonOnByDefault = value; SaveSettings(); }
+        }
+
+        /// <summary>
+        /// 同一个 avatar 下已存在 _NonToonSwitch 时复用它（把新材质追加进去）。
+        /// 关闭后每次转换都会新建一个开关。
+        /// </summary>
+        public bool ReuseExistingSwitcher
+        {
+            get { return reuseExistingSwitcher; }
+            set { reuseExistingSwitcher = value; SaveSettings(); }
         }
 
         public string MenuParameterName

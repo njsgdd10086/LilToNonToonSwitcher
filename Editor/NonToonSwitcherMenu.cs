@@ -56,6 +56,49 @@ namespace NonToonSwitcher
             NonToonEnvironmentCheck.LogReport();
         }
 
+        // ------------------------------------------------------------------ 复用开关的选项
+        //
+        // Unity 没有复选菜单项，所以按惯例做成两项互斥 + 打勾标记。
+
+        private const string ReuseOnPath = "Tools/LilToNonToon Switcher/转换时复用已有的 _NonToonSwitch";
+        private const string ReuseOffPath = "Tools/LilToNonToon Switcher/转换时总是新建 _NonToonSwitch";
+
+        [MenuItem(ReuseOnPath, false, 140)]
+        private static void EnableReuse()
+        {
+            var settings = NonToonSwitcherSettings.instance;
+            settings.ReuseExistingSwitcher = true;
+            Menu.SetChecked(ReuseOnPath, true);
+            Menu.SetChecked(ReuseOffPath, false);
+            Debug.Log("[LilToNonToon] 转换时会复用同一个 avatar 下已有的 " + NonToonConverter.SwitcherObjectName +
+                      "，新材质会追加进去。");
+        }
+
+        [MenuItem(ReuseOnPath, true)]
+        private static bool EnableReuseValidate()
+        {
+            Menu.SetChecked(ReuseOnPath, NonToonSwitcherSettings.instance.ReuseExistingSwitcher);
+            return true;
+        }
+
+        [MenuItem(ReuseOffPath, false, 141)]
+        private static void DisableReuse()
+        {
+            var settings = NonToonSwitcherSettings.instance;
+            settings.ReuseExistingSwitcher = false;
+            Menu.SetChecked(ReuseOnPath, false);
+            Menu.SetChecked(ReuseOffPath, true);
+            Debug.Log("[LilToNonToon] 转换时总是新建 " + NonToonConverter.SwitcherObjectName +
+                      "（每次转换都会产生一个新的开关）。");
+        }
+
+        [MenuItem(ReuseOffPath, true)]
+        private static bool DisableReuseValidate()
+        {
+            Menu.SetChecked(ReuseOffPath, !NonToonSwitcherSettings.instance.ReuseExistingSwitcher);
+            return true;
+        }
+
         public static ConvertRequest BuildRequestFromSettings(NonToonSwitcherSettings settings, bool createSwitcher)
         {
             return new ConvertRequest
@@ -70,6 +113,7 @@ namespace NonToonSwitcher
                 BakeBaseTexture = settings.BakeBaseTexture,
                 BakeGradients = settings.BakeGradients,
                 SwitcherMode = settings.SwitcherMode,
+                ReuseExistingSwitcher = settings.ReuseExistingSwitcher,
                 MenuParameter = settings.MenuParameterName,
                 MenuLabel = settings.MenuLabel,
             };

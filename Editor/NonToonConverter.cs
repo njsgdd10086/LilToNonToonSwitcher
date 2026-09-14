@@ -31,6 +31,11 @@ namespace NonToonSwitcher
         public bool ReplaceMaterialsOnRenderers;
         /// <summary>Also convert materials that are only referenced by animation clips.</summary>
         public bool CollectAnimatorMaterials = true;
+        /// <summary>
+        /// 同一个 avatar 下已经有 _NonToonSwitch 时，把新材质追加进去而不是新建一个。
+        /// 关掉则每次转换都新建（会产生多个开关，仅在你确实想要分开控制时才关）。
+        /// </summary>
+        public bool ReuseExistingSwitcher = true;
         public string OutputFolder = NonToonSwitcherSettings.DefaultOutputFolder;
         public string MenuParameter = "NonToon";
         public string MenuLabel = "NonToon";
@@ -659,7 +664,9 @@ namespace NonToonSwitcher
                 // 同一个 avatar 下已经转换过一次时，把新材质追加到已有的开关里，
                 // 而不是再建一个（否则转几次就会出现几个开关）。
                 var reused = false;
-                var existing = FindExistingSwitcher(request.Targets, parent);
+                var existing = request.ReuseExistingSwitcher
+                    ? FindExistingSwitcher(request.Targets, parent)
+                    : null;
                 if (existing != null && request.SwitcherMode == SwitcherMode.MaterialSetter)
                 {
                     var added = NonToonSwitcherBuilder.AppendToMaterialSetter(existing, pairs,

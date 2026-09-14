@@ -2,6 +2,15 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.3] - 2026-09-13
+
+### 新增
+
+- 菜单里新增「是否复用已有 `_NonToonSwitch`」的开关（`Tools > LilToNonToon Switcher >` 下两项互斥打勾）：
+  - **转换时复用已有的 _NonToonSwitch**（默认）
+  - **转换时总是新建 _NonToonSwitch**
+  设置窗口里也有对应复选框，设置保存在 ProjectSettings 中
+
 ## [1.0.2] - 2026-09-13
 
 ### 修复

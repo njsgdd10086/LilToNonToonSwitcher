@@ -89,6 +89,12 @@ namespace NonToonSwitcher
             if (newModeIndex != modeIndex)
                 settings.SwitcherMode = newModeIndex == 0 ? SwitcherMode.MaterialSetter : SwitcherMode.MaterialSwap;
 
+            settings.ReuseExistingSwitcher = EditorGUILayout.Toggle(
+                new GUIContent("复用已有 _NonToonSwitch",
+                    "开：同一个 avatar 下已存在 _NonToonSwitch 时，把新材质追加进去（推荐，转几次都只有一个开关）。\n" +
+                    "关：每次转换都新建一个开关，会产生多个 _NonToonSwitch。"),
+                settings.ReuseExistingSwitcher);
+
             if (settings.SwitcherMode == SwitcherMode.MaterialSetter)
             {
                 EditorGUILayout.HelpBox(
