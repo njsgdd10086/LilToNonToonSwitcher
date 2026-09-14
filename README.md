@@ -233,36 +233,6 @@ LilToNonToonSwitcher/
   [Modular Avatar](https://github.com/bdunderscore/modular-avatar)。
 - 转换是**近似**的：lilToon 与 NonToon 的光照/反射模型不同，转换后请目视确认并微调。
 
-## 十、发布流程（维护者）
-
-推一个 `v*` 标签即会自动完成打包与索引更新：
-
-```bash
-# 1) 先改 package.json 的 version（例如 1.0.1），提交
-git commit -am "chore: 版本 1.0.1"
-git push
-
-# 2) 打标签并推送，触发 .github/workflows/release.yml
-git tag v1.0.1
-git push origin v1.0.1
-```
-
-工作流会：
-
-1. 校验标签与 `package.json` 版本一致
-2. 把包内容打成 `com.nontoon.switcher-<版本>.zip`（zip 根目录直接是 `package.json`、`Editor/`，VPM 要求）
-3. 创建 GitHub Release 并上传该 zip
-4. 由 Release 资产生成 `vpm.json` / `index.json`，推送到 `gh-pages` 分支
-
-VPM 索引地址（稳定不变）：
-
-```
-https://njsgdd10086.github.io/LilToNonToonSwitcher/index.json
-```
-
-> 首次发布后，需要在仓库 **Settings → Pages** 里把 Source 设为 **Deploy from a branch → gh-pages / (root)**，
-> 上面的索引地址才会生效。
-
 ## English summary
 
 **LilToNonToon Switcher** is a Unity Editor extension that converts the lilToon materials of the
