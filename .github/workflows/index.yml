@@ -1,0 +1,78 @@
+name: 重建 VPM 索引
+
+# 「ATRI_NAIXU VPM Packages」总仓库索引：把两个插件仓库的 release 合并成一份，
+# 用户只要在 VCC / ALCOM 里加一个链接就能看到全部插件。
+#
+# - 改了索引脚本 / 本工作流：立刻重建
+# - 每天定时重建一次：把另一个仓库的新版本也带进来（同一个仓库发版时
+#   release.yml 已经会立即重建，不需要等）
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/make_vpm_repo.py'
+      - '.github/workflows/index.yml'
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # 索引里要列出的所有包所在仓库
+  PACKAGE_REPOS: 'njsgdd10086/LilToNonToonSwitcher njsgdd10086/NonToonLightLimit'
+
+jobs:
+  vpm-repo:
+    name: 生成总索引并推送到 gh-pages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 gh-pages 工作目录
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pages
+          cd pages
+          git init -q
+          git checkout -q -b gh-pages
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+
+      - name: 抓取各插件仓库的 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for repo in $PACKAGE_REPOS; do
+            file="releases-$(echo "$repo" | tr '/' '-').json"
+            echo "抓取 $repo 的 release"
+            gh api "repos/$repo/releases?per_page=100" > "$file"
+          done
+
+      - name: 生成索引
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/make_vpm_repo.py \
+            --releases releases-*.json \
+            --repository "${{ github.repository }}" \
+            --output-dir pages
+          echo "=== index.json ==="
+          cat pages/index.json
+
+      - name: 推送到 gh-pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd pages
+          git add -A
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "chore: 更新 VPM 索引" || echo "无变化"
+          git push -f origin gh-pages
+          echo "gh-pages 已更新"

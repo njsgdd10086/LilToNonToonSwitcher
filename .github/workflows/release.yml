@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # 总仓库索引里要列出的所有包所在仓库
+  PACKAGE_REPOS: 'njsgdd10086/LilToNonToonSwitcher njsgdd10086/NonToonLightLimit'
+
 jobs:
   release:
     name: 打包并创建 Release
@@ -100,9 +104,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api "repos/${{ github.repository }}/releases?per_page=100" > releases.json
+          # 把总仓库里所有插件的 release 都抓下来，合并成一份索引
+          for repo in $PACKAGE_REPOS; do
+            file="releases-$(echo "$repo" | tr '/' '-').json"
+            echo "抓取 $repo 的 release"
+            gh api "repos/$repo/releases?per_page=100" > "$file"
+          done
           python3 scripts/make_vpm_repo.py \
-            --releases releases.json \
+            --releases releases-*.json \
             --repository "${{ github.repository }}" \
             --output-dir pages
           echo "=== vpm.json ==="
