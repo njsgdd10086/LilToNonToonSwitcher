@@ -409,44 +409,67 @@ namespace NonToonSwitcher
             return null;
         }
 
+        /// <summary>
+        /// lilToon 把渲染模式写在两层里：
+        ///   · 主 shader（lilToon）用材质属性 `_TransparentMode`（0 不透明 / 1 镂空 / 2 透明 / 3 折射 / 4 毛 / 5 毛镂空 / 6 宝石）；
+        ///   · 但 lilToon 的 Inspector 一旦选了模式，材质就会被换成对应的隐藏变体
+        ///     （`Hidden/lilToonCutout`、`Hidden/lilToonTransparentOutline`、`Hidden/lilToonTwoPassTransparent` …），
+        ///     那些材质的 `_TransparentMode` 往往还是 0，模式只能从 shader 名字里读出来。
+        /// 所以先看名字，再看属性 —— 之前只看属性，导致"原来是镂空/透明的材质转完变成不透明"。
+        /// </summary>
+        private static int DetectLilToonMode(Material source)
+        {
+            var shaderName = (source.shader != null ? source.shader.name : string.Empty).ToLowerInvariant();
+
+            if (shaderName.Contains("twopasstransparent")) return 2;
+            if (shaderName.Contains("furcutout")) return 5;
+            if (shaderName.Contains("cutout")) return 1;
+            if (shaderName.Contains("transparent") || shaderName.Contains("trans")) return 2;
+            if (shaderName.Contains("gem")) return 6;
+            if (shaderName.Contains("fur")) return 4;
+
+            // 主 shader / 只有描边变体时，模式还在属性里
+            if (ShaderUtility.HasProperty(source, "_TransparentMode"))
+                return Mathf.RoundToInt(source.GetFloat("_TransparentMode"));
+
+            return 0;
+        }
+
         /// <summary>lilToon stores the rendering mode in the shader variant; NonToon stores it in a property.</summary>
         private static void ApplyRenderingMode(Material source, Material target, ConversionLog log)
         {
-            var mode = 0; // 0 opaque, 1 cutout, 2 transparent
-            var shaderName = source.shader.name ?? string.Empty;
-
-            if (ShaderUtility.HasProperty(source, "_TransparentMode"))
-                mode = Mathf.RoundToInt(source.GetFloat("_TransparentMode"));
-            else if (shaderName.Contains("cutout")) mode = 1;
-            else if (shaderName.Contains("trans")) mode = 2;
+            var mode = DetectLilToonMode(source);
 
             var resolved = 0;
             switch (mode)
             {
-                case 1: resolved = 1; break;
-                case 2: case 3: resolved = 2; break;   // transparent / refraction
-                default: resolved = 0; break;          // opaque, fur, gem
+                case 1: case 5: resolved = 1; break;         // cutout / fur cutout
+                case 2: case 3: case 6: resolved = 2; break; // transparent / refraction / gem
+                default: resolved = 0; break;                // opaque, fur
             }
 
-            if (mode == 4 || mode == 5 || mode == 6)
-                log.Unsupported("lilToon 的 " + ModeName(mode) + " 渲染模式（已按 Opaque 近似处理）");
+            if (mode == 3)
+                log.Warn("lilToon 的折射（Refraction）在 NonToon 里没有对应实现，已按透明处理。");
+            else if (mode == 4 || mode == 5 || mode == 6)
+                log.Unsupported("lilToon 的 " + ModeName(mode) + " 渲染模式（已按" +
+                                (resolved == 0 ? "不透明" : "镂空") + "近似处理）");
 
             if (!ShaderUtility.HasProperty(target, "_RenderingMode"))
             {
-                log.Warn("当前 NonToon 版本没有 _RenderingMode 属性，渲染模式未做修改。");
+                log.Warn("当前 NonToon 版本没有 _RenderingMode 属性（例如 NonToonFur），渲染模式未做修改。");
                 return;
             }
 
             ShaderUtility.SetIntValue(target, "_RenderingMode", resolved);
 
-            // Mirror what NonToon's own inspector does when the mode changes. The render queue values are the
-            // canonical ones from NonToon's rendering mode popup.
+            // 下面这套数值和 NonToon 自己的渲染模式下拉框（Editor/RenderingModeElement.cs）完全一致。
             switch (resolved)
             {
                 case 0:
                     ShaderUtility.SetIntValue(target, "_SrcBlend", (int)BlendMode.One);
                     ShaderUtility.SetIntValue(target, "_DstBlend", (int)BlendMode.Zero);
                     ShaderUtility.SetIntValue(target, "_AlphaToMask", 0);
+                    ShaderUtility.SetIntValue(target, "_ZWrite", 1);
                     target.renderQueue = -1;
                     break;
                 case 1:
@@ -454,17 +477,21 @@ namespace NonToonSwitcher
                     ShaderUtility.SetIntValue(target, "_DstBlend", (int)BlendMode.Zero);
                     var dither = ShaderUtility.HasProperty(target, "_NTDitherTex") ? target.GetTexture("_NTDitherTex") : null;
                     ShaderUtility.SetIntValue(target, "_AlphaToMask", dither != null ? 0 : 1);
+                    ShaderUtility.SetIntValue(target, "_ZWrite", 1);
                     target.renderQueue = 2450;
                     break;
                 default:
                     ShaderUtility.SetIntValue(target, "_SrcBlend", (int)BlendMode.SrcAlpha);
                     ShaderUtility.SetIntValue(target, "_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
                     ShaderUtility.SetIntValue(target, "_AlphaToMask", 0);
-                    target.renderQueue = 2460;
+                    // lilToon 的透明变体是 ZWrite Off；NonToon 的 Inspector 不主动改这个开关，这里替它改掉
+                    ShaderUtility.SetIntValue(target, "_ZWrite", 0);
+                    target.renderQueue = GraphicsSettings.currentRenderPipeline != null ? 3000 : 2460;
                     break;
             }
 
-            log.Mapped("rendering mode " + ModeName(mode), "NonToon " + RenderingModeName(resolved));
+            log.Mapped("rendering mode " + ModeName(mode) + "（按 shader 名判断：" + source.shader.name + "）",
+                "NonToon " + RenderingModeName(resolved));
 
             if (ShaderUtility.HasProperty(source, "_AlphaMaskMode") && source.GetFloat("_AlphaMaskMode") != 0f && resolved == 0)
             {

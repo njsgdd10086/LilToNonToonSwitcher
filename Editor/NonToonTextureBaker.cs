@@ -67,14 +67,18 @@ namespace NonToonSwitcher
             {
                 width = Mathf.Clamp(Mathf.NextPowerOfTwo(texture.width), 4, 4096);
                 height = Mathf.Clamp(Mathf.NextPowerOfTwo(texture.height), 4, 4096);
-                var temporary = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+                // 用 sRGB 的 RenderTexture + 非 linear 的临时贴图，拿到的才是"贴图里存的那份数值"（sRGB 编码），
+                // 和 isReadable 时 GetPixels() 的结果一致。
+                // 之前用 ReadWrite.Linear，RT 里存的是线性化后的值，两条路径结果不一样，
+                // 后面的烘焙（Gamma 那一步）会因此算得过暗。
+                var temporary = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
                 var previous = RenderTexture.active;
                 Texture2D readable = null;
                 try
                 {
                     Graphics.Blit(texture, temporary);
                     RenderTexture.active = temporary;
-                    readable = new Texture2D(width, height, TextureFormat.RGBA32, false, true);
+                    readable = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
                     readable.ReadPixels(new Rect(0, 0, width, height), 0, 0);
                     readable.Apply();
                     pixels = readable.GetPixels();
@@ -120,27 +124,85 @@ namespace NonToonSwitcher
             if (source == null) return null;
 
             var tint = ShaderUtility.HasProperty(lilToonMaterial, "_Color") ? lilToonMaterial.GetColor("_Color") : Color.white;
-            var hires = tint.r != 1f || tint.g != 1f || tint.b != 1f;
+            var hsvg = ShaderUtility.HasProperty(lilToonMaterial, "_MainTexHSVG")
+                ? lilToonMaterial.GetVector("_MainTexHSVG")
+                : new Vector4(0f, 1f, 1f, 1f);
+            var gradationStrength = ShaderUtility.HasProperty(lilToonMaterial, "_MainGradationStrength")
+                ? lilToonMaterial.GetFloat("_MainGradationStrength")
+                : 0f;
+            var gradationTexture = gradationStrength > 0f ? lilToonMaterial.GetTexture("_MainGradationTex") as Texture2D : null;
+            var adjustMask = lilToonMaterial.GetTexture("_MainColorAdjustMask") as Texture2D;
 
-            // Nothing to do when the colour is white - keep referencing the original texture.
-            if (!hires)
+            var tintChanged = !Mathf.Approximately(tint.r, 1f) || !Mathf.Approximately(tint.g, 1f) ||
+                              !Mathf.Approximately(tint.b, 1f) || !Mathf.Approximately(tint.a, 1f);
+            var toneChanged = !Mathf.Approximately(hsvg.x, 0f) || !Mathf.Approximately(hsvg.y, 1f) ||
+                              !Mathf.Approximately(hsvg.z, 1f) || !Mathf.Approximately(hsvg.w, 1f);
+            var gradationUsed = gradationTexture != null && gradationStrength > 0f;
+
+            // 主色、色调校正（HSV/Gamma）、渐变映射都是默认值时，直接沿用原贴图。
+            if (!tintChanged && !toneChanged && !gradationUsed)
             {
-                log.Mapped("_MainTex（颜色为白）", "_BaseTexture（保留原贴图）");
+                log.Mapped("_MainTex（主色 / 色调校正都是默认值）", "_BaseTexture（保留原贴图）");
                 return null;
             }
 
             if (!TryReadPixels(source, out var pixels, out var width, out var height, log, "the base texture"))
             {
-                log.Warn("_Color 不是白色，但基础贴图读取失败，颜色乘算没有烘焙进去。" +
+                log.Warn("主色 / 色调校正需要烘焙，但基础贴图读取失败，这些设置没有烘焙进去。" +
                          "请手动设置转换后材质的颜色，或在贴图上勾选 Read/Write。");
                 return null;
             }
 
-            var alpha = tint.a;
+            // 色调校正的遮罩和渐变映射：UV 与主贴图一致（lilToon 就是这么采样的）
+            Color[] maskPixels = null;
+            var maskWidth = 0;
+            var maskHeight = 0;
+            if (adjustMask != null &&
+                !TryReadPixels(adjustMask, out maskPixels, out maskWidth, out maskHeight, null, "the colour adjust mask"))
+                maskPixels = null;
+
+            Color[] gradationPixels = null;
+            var gradationWidth = 0;
+            if (gradationUsed &&
+                !TryReadPixels(gradationTexture, out gradationPixels, out gradationWidth, out _, null, "the gradation map"))
+                gradationPixels = null;
+
+            // 贴图是不是 sRGB，决定要不要先线性化再算 —— 和 shader 里采样后的空间保持一致，
+            // 否则 Gamma 那一步（pow）在 sRGB 数值上算出来的结果会明显不对。
+            var sourceIsSrgb = true;
+            var sourcePath = AssetDatabase.GetAssetPath(source);
+            if (!string.IsNullOrEmpty(sourcePath) && AssetImporter.GetAtPath(sourcePath) is TextureImporter sourceImporter)
+                sourceIsSrgb = sourceImporter.sRGBTexture;
+            var linearWork = PlayerSettings.colorSpace == ColorSpace.Linear && sourceIsSrgb;
+
+            var hdrClipped = false;
             for (var i = 0; i < pixels.Length; i++)
             {
                 var pixel = pixels[i];
-                pixels[i] = new Color(pixel.r * tint.r, pixel.g * tint.g, pixel.b * tint.b, pixel.a * alpha);
+                var rgb = linearWork
+                    ? new Vector3(SrgbToLinear(pixel.r), SrgbToLinear(pixel.g), SrgbToLinear(pixel.b))
+                    : new Vector3(pixel.r, pixel.g, pixel.b);
+
+                var before = rgb;
+                if (toneChanged) rgb = ToneCorrection(rgb, hsvg);
+                if (gradationPixels != null) rgb = GradationMap(rgb, gradationPixels, gradationWidth, gradationStrength, linearWork);
+                if (maskPixels != null)
+                {
+                    var x = width > 0 ? Mathf.Clamp((int)((i % width) * (maskWidth / (float)width)), 0, maskWidth - 1) : 0;
+                    var y = width > 0 && height > 0
+                        ? Mathf.Clamp((int)((i / width) * (maskHeight / (float)height)), 0, maskHeight - 1)
+                        : 0;
+                    var mask = maskPixels[Mathf.Clamp(y * maskWidth + x, 0, maskPixels.Length - 1)].r;
+                    rgb = Vector3.Lerp(before, rgb, mask);
+                }
+
+                // 最后才乘主色（含 alpha），顺序和 lilToon 的 `fd.col *= _Color` 一致
+                rgb = new Vector3(rgb.x * tint.r, rgb.y * tint.g, rgb.z * tint.b);
+                if (rgb.x > 1f || rgb.y > 1f || rgb.z > 1f) hdrClipped = true;
+                if (linearWork) rgb = new Vector3(LinearToSrgb(rgb.x), LinearToSrgb(rgb.y), LinearToSrgb(rgb.z));
+
+                pixels[i] = new Color(Mathf.Clamp01(rgb.x), Mathf.Clamp01(rgb.y), Mathf.Clamp01(rgb.z),
+                    Mathf.Clamp01(pixel.a * tint.a));
             }
 
             var name = ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Base.png";
@@ -158,26 +220,120 @@ namespace NonToonSwitcher
 
             // Keep the source import settings as close as possible.
             if (AssetImporter.GetAtPath(path) is TextureImporter importer &&
-                !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(source)) &&
-                AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(source)) is TextureImporter sourceImporter)
+                !string.IsNullOrEmpty(sourcePath) &&
+                AssetImporter.GetAtPath(sourcePath) is TextureImporter originalImporter)
             {
-                importer.sRGBTexture = sourceImporter.sRGBTexture;
-                importer.alphaSource = sourceImporter.alphaSource;
-                importer.alphaIsTransparency = sourceImporter.alphaIsTransparency;
-                importer.mipmapEnabled = sourceImporter.mipmapEnabled;
-                importer.streamingMipmaps = sourceImporter.streamingMipmaps;
-                importer.maxTextureSize = sourceImporter.maxTextureSize;
-                importer.textureCompression = sourceImporter.textureCompression;
-                importer.wrapMode = sourceImporter.wrapMode;
-                importer.filterMode = sourceImporter.filterMode;
-                importer.anisoLevel = sourceImporter.anisoLevel;
+                importer.sRGBTexture = originalImporter.sRGBTexture;
+                importer.alphaSource = originalImporter.alphaSource;
+                importer.alphaIsTransparency = originalImporter.alphaIsTransparency;
+                importer.mipmapEnabled = originalImporter.mipmapEnabled;
+                importer.streamingMipmaps = originalImporter.streamingMipmaps;
+                importer.maxTextureSize = originalImporter.maxTextureSize;
+                importer.textureCompression = originalImporter.textureCompression;
+                importer.wrapMode = originalImporter.wrapMode;
+                importer.filterMode = originalImporter.filterMode;
+                importer.anisoLevel = originalImporter.anisoLevel;
                 importer.SaveAndReimport();
             }
 
             asset = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-            log.Mapped("_MainTex x _Color", "_BaseTexture (baked PNG)");
+
+            var what = new List<string>();
+            if (toneChanged) what.Add("色调校正 HSV/Gamma");
+            if (gradationPixels != null) what.Add("渐变映射 " + gradationStrength.ToString("0.###"));
+            if (maskPixels != null) what.Add("色调校正遮罩");
+            if (tintChanged) what.Add("主色 " + tint);
+            log.Mapped("_MainTex + " + string.Join(" + ", what.ToArray()), "_BaseTexture（已烘焙 PNG）");
+
+            if (hdrClipped)
+                log.Warn("主色（HDR）超过了 1，烘焙进 8 位贴图时被截断了；" +
+                         "如果转换后觉得太暗，可以手动把亮度找回来。");
             return asset;
         }
+
+        // ------------------------------------------------------------------ lilToon 主色处理链（CPU 版）
+
+        /// <summary>lilToon 的 float3 lilToneCorrection(float3 c, float4 hsvg) 的 CPU 版本。</summary>
+        private static Vector3 ToneCorrection(Vector3 c, Vector4 hsvg)
+        {
+            // gamma
+            var gamma = Mathf.Approximately(hsvg.w, 0f) ? 1f : hsvg.w;
+            c = new Vector3(Mathf.Pow(Mathf.Abs(c.x), gamma), Mathf.Pow(Mathf.Abs(c.y), gamma),
+                Mathf.Pow(Mathf.Abs(c.z), gamma));
+
+            // rgb -> hsv（照抄 lilToon 的写法，省得引入不同的分支）
+            var p = c.z > c.y ? new Vector4(c.z, c.y, -1f, 2f / 3f) : new Vector4(c.y, c.z, 0f, -1f / 3f);
+            var q = p.x > c.x ? new Vector4(p.x, p.y, p.w, c.x) : new Vector4(c.x, p.y, p.z, p.x);
+            var d = q.x - Mathf.Min(q.w, q.y);
+            const float epsilon = 1e-10f;
+            var hue = Mathf.Abs(q.z + (q.w - q.y) / (6f * d + epsilon));
+            var saturation = d / (q.x + epsilon);
+            var value = q.x;
+
+            // shift
+            hue += hsvg.x;
+            saturation = Mathf.Clamp01(saturation * hsvg.y);
+            value = Mathf.Clamp01(value * hsvg.z);
+
+            // hsv -> rgb
+            var f = new Vector3(
+                SaturationCurve(hue + 1f),
+                SaturationCurve(hue + 2f / 3f),
+                SaturationCurve(hue + 1f / 3f));
+            var baseValue = value - value * saturation;
+            var amplitude = value * saturation;
+            return new Vector3(baseValue + amplitude * f.x, baseValue + amplitude * f.y, baseValue + amplitude * f.z);
+        }
+
+        private static float SaturationCurve(float hue)
+        {
+            var wrapped = hue - Mathf.Floor(hue);
+            return Mathf.Clamp01(Mathf.Abs(wrapped * 6f - 3f) - 1f);
+        }
+
+        /// <summary>lilToon 的 float3 lilGradationMap(float3 col, TEXTURE2D(gradationMap), float strength) 的 CPU 版本。</summary>
+        private static Vector3 GradationMap(Vector3 col, Color[] gradation, int gradationWidth, float strength, bool linearWork)
+        {
+            if (gradation == null || gradationWidth <= 0 || strength <= 0f) return col;
+
+            // lilToon 在 sRGB 空间里采样渐变：线性工程先把颜色转成 sRGB，采样完再转回来
+            var sample = linearWork
+                ? new Vector3(LinearToSrgb(col.x), LinearToSrgb(col.y), LinearToSrgb(col.z))
+                : col;
+
+            var mapped = new Vector3(
+                SampleGradation(gradation, gradationWidth, sample.x).r,
+                SampleGradation(gradation, gradationWidth, sample.y).g,
+                SampleGradation(gradation, gradationWidth, sample.z).b);
+
+            if (linearWork)
+                mapped = new Vector3(SrgbToLinear(mapped.x), SrgbToLinear(mapped.y), SrgbToLinear(mapped.z));
+
+            return Vector3.Lerp(col, mapped, Mathf.Clamp01(strength));
+        }
+
+        /// <summary>一维渐变：x 轴是输入值，取中间那一行（lilToon 的 LIL_SAMPLE_1D）。</summary>
+        private static Color SampleGradation(Color[] gradation, int width, float input)
+        {
+            if (gradation == null || gradation.Length == 0) return Color.black;
+            var height = Mathf.Max(1, gradation.Length / Mathf.Max(1, width));
+            var x = Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp01(input) * (width - 1)), 0, width - 1);
+            var y = Mathf.Clamp(height / 2, 0, height - 1);
+            return gradation[Mathf.Clamp(y * width + x, 0, gradation.Length - 1)];
+        }
+
+        private static float SrgbToLinear(float value)
+        {
+            value = Mathf.Clamp01(value);
+            return value <= 0.04045f ? value / 12.92f : Mathf.Pow((value + 0.055f) / 1.055f, 2.4f);
+        }
+
+        private static float LinearToSrgb(float value)
+        {
+            value = Mathf.Max(0f, value);
+            return value <= 0.0031308f ? value * 12.92f : 1.055f * Mathf.Pow(value, 1f / 2.4f) - 0.055f;
+        }
+
 
         // ------------------------------------------------------------------ Shader Core gradient array (.scgradients)
 

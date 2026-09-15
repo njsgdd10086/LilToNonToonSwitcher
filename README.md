@@ -155,10 +155,10 @@ Assets/NonToonConverted/衣服/
 
 | lilToon | NonToon | 说明 |
 | --- | --- | --- |
-| `_MainTex` × `_Color` | `_BaseTexture` | 生成带颜色乘算的 PNG（Scale/Offset 一并继承） |
+| `_MainTex` + 主色 / 色调校正 / 渐变映射 | `_BaseTexture` | 按 lilToon 的处理顺序烘焙成 PNG：贴图 → 色调校正（HSV/Gamma，含 `_MainColorAdjustMask`）→ 渐变映射（`_MainGradationTex` / `_MainGradationStrength`）→ `× _Color`（含 Alpha、HDR）。值为全默认时直接沿用原贴图 |
 | `_BumpMap` / `_BumpScale` | `_NormalMap` / `_NormalScale` | 直接复制 |
 | `_Cutoff` | `_Cutoff` | 直接复制 |
-| `_TransparentMode` | `_RenderingMode` + Blend/Queue | 分别对应 Opaque / Cutout / Transparent |
+| 渲染模式（`_TransparentMode` 或 shader 名） | `_RenderingMode` + Blend / Queue / ZWrite | 先按 **shader 名字**判断（lilToon 选了模式后材质会换成 `Hidden/lilToonCutout`、`Hidden/lilToonTransparentOutline`、`Hidden/lilToonTwoPassTransparent` 这类隐藏变体，那些材质的 `_TransparentMode` 常常还是 0），再退回属性；Opaque / Cutout / Transparent 与 NonToon 自己的渲染模式下拉框设置完全一致 |
 | `_OutlineColor` / `_OutlineWidth` / `_OutlineZBias` | `_OutlineColor` / `_OutlineWidth` / `_OutlineZOffset` | 近似复制 |
 | `_OutlineVertexR2Width` | `_OutlineFromVertexColor` | 用顶点色控制描边宽度 |
 | `_AlphaMask` | `_SharedMask`（对应通道） | 烘焙进共享遮罩 |

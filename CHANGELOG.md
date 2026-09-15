@@ -2,6 +2,36 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.0] - 2026-09-15
+
+### 修复
+
+- **用 HDR 主色 / 色调校正改色的衣服，转换后颜色变回去了**：
+  之前只把 `_MainTex × _Color` 烘焙进 `_BaseTexture`，而且 `_Color` 是白色（HDR 白也算白色）时直接沿用原贴图，
+  于是 lilToon 的「色调校正」（HSV / Gamma + `_MainColorAdjustMask`）和「渐变映射」
+  （`_MainGradationTex` / `_MainGradationStrength`）全都没了。
+  现在按 lilToon 的处理顺序完整烘焙：
+
+  ```
+  贴图 → 色调校正 HSV/Gamma → 渐变映射 → 色调校正遮罩（lerp）→ × _Color（含 Alpha / HDR）
+  ```
+
+  数值全为默认时仍然直接沿用原贴图（不会白白生成一张 PNG）。
+- **原来是「镂空 / 透明」的材质，转完变成不透明**：lilToon 的 Inspector 一旦选了渲染模式，
+  材质会被换成对应的隐藏变体（`Hidden/lilToonCutout`、`Hidden/lilToonTransparentOutline`、
+  `Hidden/lilToonTwoPassTransparent` …），这些材质的 `_TransparentMode` 往往还是 0，
+  旧代码只看属性、不看 shader 名，于是判成 Opaque。
+  现在先按 **shader 名字**判断，再退回属性；透明模式会一并把 `_ZWrite` 关掉（和 lilToon 的透明变体一致），
+  Blend / RenderQueue 的数值与 NonToon 自己的渲染模式下拉框完全一致。
+- **没有勾选 Read/Write 的贴图，读取时颜色空间不一致**：走 RenderTexture 兜底的那条路以前返回线性化后的数值，
+  和 `GetPixels()` 的原始数值不一样，颜色乘算 / 色调校正会算得过暗。现在两条路径返回同一份数据。
+
+### 新增
+
+- 转换日志会写明渲染模式是**按 shader 名**判断出来的
+  （例如 `rendering mode Cutout（按 shader 名判断：Hidden/lilToonCutout）`）；
+  主色烘焙也会列出到底烘焙了哪几项（色调校正 / 渐变映射 / 遮罩 / 主色）。
+
 ## [1.0.3] - 2026-09-13
 
 ### 新增
