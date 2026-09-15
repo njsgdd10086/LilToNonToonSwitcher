@@ -27,19 +27,3 @@ jobs:
             exit 1
           fi
           echo "未发现个人路径"
-
-      - name: 自检索引脚本能否运行
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo '[{"draft":false,"assets":[{"name":"com.nontoon.switcher-1.0.0.zip","browser_download_url":"https://example.com/a.zip"}]}]' > /tmp/fake-releases.json
-          python3 scripts/make_vpm_repo.py --releases /tmp/fake-releases.json \
-            --repository "${{ github.repository }}" --output-dir /tmp/vpm-out
-          python3 - <<'PY'
-          import json, pathlib
-          data = json.loads(pathlib.Path("/tmp/vpm-out/index.json").read_text(encoding="utf-8"))
-          version = data["packages"]["com.nontoon.switcher"]["versions"]["1.0.0"]
-          assert version["url"] == "https://example.com/a.zip", version
-          assert data["url"].endswith("/index.json"), data["url"]
-          print("索引脚本自检通过")
-          PY

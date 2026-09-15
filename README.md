@@ -32,15 +32,16 @@
 2. 填入总仓库地址（**一个链接就够**，本插件和 [NonToon Light Limit](https://github.com/njsgdd10086/NonToonLightLimit) 都在这份索引里）：
 
    ```
-   https://njsgdd10086.github.io/LilToNonToonSwitcher/index.json
+   https://njsgdd10086.github.io/vpm-listing/index.json
    ```
 
 3. 回到项目的 **Manage Project**，在 `LilToNonToon Switcher` 上点 **Add**。
    之后有新版本时，VCC / ALCOM 会直接提示升级。
 
-> 这个索引是「**ATRI_NAIXU VPM Packages**」总仓库，包含：
-> `com.nontoon.switcher`（本插件）与 `com.atrinaxu.nontoon.lightlimit`（NonToon 亮度控制），
-> 后面的插件按需勾选安装即可。
+> 这个索引是「**ATRI_NAIXU VPM Packages**」总仓库（独立的
+> [vpm-listing](https://github.com/njsgdd10086/vpm-listing) 仓库，由 Actions 自动从各插件仓库的
+> Release 生成），包含 `com.nontoon.switcher`（本插件）与
+> `com.atrinaxu.nontoon.lightlimit`（NonToon 亮度控制），按需勾选安装即可。
 
 ### 方式 2：unitypackage
 
