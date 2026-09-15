@@ -2,6 +2,30 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.1] - 2026-09-15
+
+### 修复
+
+- **透明材质转完「该实心的地方透了、前后遮挡也乱了」**（1.1.0 引入）。
+  1.1.0 判断出透明模式后，会把 `_ZWrite` 强制设成 0、Blend 设成 `SrcAlpha / OneMinusSrcAlpha`、
+  渲染队列设成 2460 —— 但 lilToon 的混合方式 / `_ZWrite` / `_Cull` / `_AlphaToMask` / 渲染队列
+  **全都是材质驱动的**（pass 里写的是 `Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]`、
+  `ZWrite [_ZWrite]`，渲染队列也能被材质覆盖），作者经常故意调成
+  「透明混合但仍然写深度、还待在几何队列里」（例如 MANUKA 的脸、头发就是
+  `Blend One OneMinusSrcAlpha` + `_ZWrite 1` + 队列 2000 / 2450）。
+  强制改成 NonToon 的默认值以后，这些部件就会透出背后的东西，遮挡顺序也跟着乱。
+
+  现在 `_RenderingMode` 只负责 NonToon 怎么处理 alpha（不透明强制 1 / 镂空做剪切 / 透明保留），
+  以下这些**全部沿用原材质**：
+
+  ```
+  _Cull、_SrcBlend、_DstBlend、_SrcBlendAlpha、_DstBlendAlpha、_ZWrite、_AlphaToMask
+  渲染队列：原材质自己设过就照搬，否则用原 shader 声明的队列（透明 2460 / 镂空 2450 / 不透明 2000）
+  ```
+
+  只有原材质没有这些属性时，才退回 NonToon 自己那套模式默认值（和它的渲染模式下拉框一致）。
+  转换日志会多一行 `渲染状态（沿用原材质）`，写明实际沿用了哪些值、队列是多少。
+
 ## [1.1.0] - 2026-09-15
 
 ### 修复

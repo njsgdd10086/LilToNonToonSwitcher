@@ -435,6 +435,19 @@ namespace NonToonSwitcher
             return 0;
         }
 
+        /// <summary>
+        /// lilToon 的混合方式 / ZWrite / Cull / AlphaToMask 都是"材质驱动"的
+        /// （lilToon 的 pass 里写的是 Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]、
+        /// ZWrite [_ZWrite]、Cull [_Cull]、AlphaToMask [_AlphaToMask]，渲染队列也能被材质覆盖），
+        /// 所以这些值必须原样搬到 NonToon 上。否则作者特意调过的材质 —— 例如"透明混合但仍然写深度、
+        /// 还待在几何队列里"的脸和头发 —— 会被改成"不写深度 + 排到透明队列"，
+        /// 表现就是该实心的地方透了、前后遮挡关系也乱了。
+        /// </summary>
+        private static readonly string[] CopiedRenderStates =
+        {
+            "_Cull", "_SrcBlend", "_DstBlend", "_SrcBlendAlpha", "_DstBlendAlpha", "_ZWrite", "_AlphaToMask",
+        };
+
         /// <summary>lilToon stores the rendering mode in the shader variant; NonToon stores it in a property.</summary>
         private static void ApplyRenderingMode(Material source, Material target, ConversionLog log)
         {
@@ -460,42 +473,96 @@ namespace NonToonSwitcher
                 return;
             }
 
+            // _RenderingMode 只决定 NonToon 怎么处理 alpha（不透明强制 1 / 镂空剪切 / 透明保留），
+            // 具体怎么混合、写不写深度由下面的材质属性决定。
             ShaderUtility.SetIntValue(target, "_RenderingMode", resolved);
 
-            // 下面这套数值和 NonToon 自己的渲染模式下拉框（Editor/RenderingModeElement.cs）完全一致。
+            // 先用 NonToon 自己那套模式默认值打底（和它的渲染模式下拉框完全一致），
+            // 源材质没有对应属性时就用这套值。
+            ApplyModeDefaults(target, resolved);
+
+            // 再用源材质的渲染状态覆盖：lilToon 里这些值就是用户/作者调过的真实值。
+            var copied = CopyRenderStates(source, target);
+            target.renderQueue = ResolveRenderQueue(source, resolved);
+
+            log.Mapped("rendering mode " + ModeName(mode) + "（按 shader 名判断：" + source.shader.name + "）",
+                "NonToon " + RenderingModeName(resolved));
+            log.Mapped("渲染状态（沿用原材质）", copied + "，队列 " +
+                (target.renderQueue >= 0 ? target.renderQueue.ToString() : "默认"));
+
+            if (ShaderUtility.HasProperty(source, "_AlphaMaskMode") && source.GetFloat("_AlphaMaskMode") != 0f && resolved == 0)
+            {
+                log.Warn("lilToon 用了透明遮罩，但材质是 Opaque；NonToon 只在 Cutout / Transparent 模式下应用透明遮罩。");
+            }
+        }
+
+        /// <summary>The values NonToon's own rendering-mode dropdown writes (Editor/RenderingModeElement.cs).</summary>
+        private static void ApplyModeDefaults(Material target, int resolved)
+        {
             switch (resolved)
             {
-                case 0:
-                    ShaderUtility.SetIntValue(target, "_SrcBlend", (int)BlendMode.One);
-                    ShaderUtility.SetIntValue(target, "_DstBlend", (int)BlendMode.Zero);
-                    ShaderUtility.SetIntValue(target, "_AlphaToMask", 0);
-                    ShaderUtility.SetIntValue(target, "_ZWrite", 1);
-                    target.renderQueue = -1;
-                    break;
                 case 1:
                     ShaderUtility.SetIntValue(target, "_SrcBlend", (int)BlendMode.One);
                     ShaderUtility.SetIntValue(target, "_DstBlend", (int)BlendMode.Zero);
                     var dither = ShaderUtility.HasProperty(target, "_NTDitherTex") ? target.GetTexture("_NTDitherTex") : null;
                     ShaderUtility.SetIntValue(target, "_AlphaToMask", dither != null ? 0 : 1);
                     ShaderUtility.SetIntValue(target, "_ZWrite", 1);
-                    target.renderQueue = 2450;
                     break;
-                default:
+                case 2:
                     ShaderUtility.SetIntValue(target, "_SrcBlend", (int)BlendMode.SrcAlpha);
                     ShaderUtility.SetIntValue(target, "_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
                     ShaderUtility.SetIntValue(target, "_AlphaToMask", 0);
-                    // lilToon 的透明变体是 ZWrite Off；NonToon 的 Inspector 不主动改这个开关，这里替它改掉
                     ShaderUtility.SetIntValue(target, "_ZWrite", 0);
-                    target.renderQueue = GraphicsSettings.currentRenderPipeline != null ? 3000 : 2460;
+                    break;
+                default:
+                    ShaderUtility.SetIntValue(target, "_SrcBlend", (int)BlendMode.One);
+                    ShaderUtility.SetIntValue(target, "_DstBlend", (int)BlendMode.Zero);
+                    ShaderUtility.SetIntValue(target, "_AlphaToMask", 0);
+                    ShaderUtility.SetIntValue(target, "_ZWrite", 1);
                     break;
             }
+        }
 
-            log.Mapped("rendering mode " + ModeName(mode) + "（按 shader 名判断：" + source.shader.name + "）",
-                "NonToon " + RenderingModeName(resolved));
-
-            if (ShaderUtility.HasProperty(source, "_AlphaMaskMode") && source.GetFloat("_AlphaMaskMode") != 0f && resolved == 0)
+        /// <summary>Copies lilToon's material-driven render states and returns them for the report.</summary>
+        private static string CopyRenderStates(Material source, Material target)
+        {
+            var parts = new List<string>();
+            foreach (var name in CopiedRenderStates)
             {
-                log.Warn("lilToon 用了透明遮罩，但材质是 Opaque；NonToon 只在 Cutout / Transparent 模式下应用透明遮罩。");
+                if (!ShaderUtility.HasProperty(source, name)) continue;
+                if (!ShaderUtility.HasProperty(target, name)) continue;
+                if (!ShaderUtility.CopyProperty(source, target, name)) continue;
+                parts.Add(name.Substring(1) + "=" + ReadSourceInt(source, name));
+            }
+            return parts.Count > 0 ? string.Join("、", parts.ToArray()) : "无可沿用项";
+        }
+
+        /// <summary>
+        /// 读原材质的整数值（只用于写日志）。材质变体（m_Parent 指向父材质）的属性是从父材质继承来的，
+        /// 序列化列表里没有条目，这时要让 Unity 通过 Material.GetInt 把继承值解析出来。
+        /// </summary>
+        private static int ReadSourceInt(Material source, string name)
+        {
+            var value = ShaderUtility.ReadSerializedInt(source, name, int.MinValue);
+            if (value != int.MinValue) return value;
+            try { return source.GetInt(name); }
+            catch (Exception) { return 0; }
+        }
+
+        /// <summary>
+        /// 渲染队列：原材质自己设过就照搬；否则用原 shader 声明的队列（lilToon 的透明变体是 2460、
+        /// 镂空 2450、不透明 2000、宝石 2900）；两者都没有才退回 NonToon 的模式默认值。
+        /// </summary>
+        private static int ResolveRenderQueue(Material source, int resolved)
+        {
+            if (source.renderQueue >= 0) return source.renderQueue;
+            if (source.shader != null && source.shader.renderQueue >= 0) return source.shader.renderQueue;
+
+            switch (resolved)
+            {
+                case 1: return 2450;
+                case 2: return GraphicsSettings.currentRenderPipeline != null ? 3000 : 2460;
+                default: return -1;
             }
         }
 

@@ -158,7 +158,7 @@ Assets/NonToonConverted/衣服/
 | `_MainTex` + 主色 / 色调校正 / 渐变映射 | `_BaseTexture` | 按 lilToon 的处理顺序烘焙成 PNG：贴图 → 色调校正（HSV/Gamma，含 `_MainColorAdjustMask`）→ 渐变映射（`_MainGradationTex` / `_MainGradationStrength`）→ `× _Color`（含 Alpha、HDR）。值为全默认时直接沿用原贴图 |
 | `_BumpMap` / `_BumpScale` | `_NormalMap` / `_NormalScale` | 直接复制 |
 | `_Cutoff` | `_Cutoff` | 直接复制 |
-| 渲染模式（`_TransparentMode` 或 shader 名） | `_RenderingMode` + Blend / Queue / ZWrite | 先按 **shader 名字**判断（lilToon 选了模式后材质会换成 `Hidden/lilToonCutout`、`Hidden/lilToonTransparentOutline`、`Hidden/lilToonTwoPassTransparent` 这类隐藏变体，那些材质的 `_TransparentMode` 常常还是 0），再退回属性；Opaque / Cutout / Transparent 与 NonToon 自己的渲染模式下拉框设置完全一致 |
+| 渲染模式（`_TransparentMode` 或 shader 名） | `_RenderingMode` + Blend / Queue / ZWrite | 先按 **shader 名字**判断（lilToon 选了模式后材质会换成 `Hidden/lilToonCutout`、`Hidden/lilToonTransparentOutline`、`Hidden/lilToonTwoPassTransparent` 这类隐藏变体，那些材质的 `_TransparentMode` 常常还是 0），再退回属性。`_RenderingMode` 只决定 NonToon 怎么处理 Alpha（不透明强制 1 / 镂空做剪切 / 透明保留）；混合方式、`_ZWrite`、`_Cull`、`_AlphaToMask`、渲染队列**沿用原材质**（lilToon 这些值都是材质驱动的，作者常故意调成「透明混合但写深度、待在几何队列」，例如 MANUKA 的脸和头发），原材质没有这些属性时才用 NonToon 自己的模式默认值 |
 | `_OutlineColor` / `_OutlineWidth` / `_OutlineZBias` | `_OutlineColor` / `_OutlineWidth` / `_OutlineZOffset` | 近似复制 |
 | `_OutlineVertexR2Width` | `_OutlineFromVertexColor` | 用顶点色控制描边宽度 |
 | `_AlphaMask` | `_SharedMask`（对应通道） | 烘焙进共享遮罩 |
