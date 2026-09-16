@@ -120,8 +120,11 @@ namespace NonToonSwitcher
         public static Texture2D BakeBaseTexture(Material lilToonMaterial, Material nonToonMaterial, string folder,
             ConversionLog log)
         {
+            // 源材质可能**根本没挂主贴图**（`_MainTex` = fileID 0）—— 那 lilToon 渲染时用的是 shader 里
+            // 声明的默认白贴图。这种情况下 `_BaseTexture` 会是空的，但 alpha 相关的东西（透明遮罩的
+            // scale/value）依然要烘出来，所以要拿"白底"当像素来源，而不是直接返回。
             var source = nonToonMaterial.GetTexture("_BaseTexture");
-            if (source == null) return null;
+            var usesDefaultWhite = source == null;
 
             var tint = ShaderUtility.HasProperty(lilToonMaterial, "_Color") ? lilToonMaterial.GetColor("_Color") : Color.white;
             var hsvg = ShaderUtility.HasProperty(lilToonMaterial, "_MainTexHSVG")
@@ -133,23 +136,39 @@ namespace NonToonSwitcher
             var gradationTexture = gradationStrength > 0f ? lilToonMaterial.GetTexture("_MainGradationTex") as Texture2D : null;
             var adjustMask = lilToonMaterial.GetTexture("_MainColorAdjustMask") as Texture2D;
 
+            // lilToon 的「透明遮罩」（_AlphaMaskMode）是直接改 alpha 的：
+            //   mode 1 用遮罩替换 alpha，2 相乘，3 相加，4 相减，遮罩值先过 scale/value。
+            // NonToon 没有这个功能（_SharedMask 只喂给各个模块做范围遮罩），所以只能把
+            // 这条链烘进基础贴图的 Alpha —— 半透明轻纱（Veil 之类）就是靠它才有薄纱感。
+            var alphaMaskMode = ShaderUtility.HasProperty(lilToonMaterial, "_AlphaMaskMode")
+                ? Mathf.RoundToInt(lilToonMaterial.GetFloat("_AlphaMaskMode"))
+                : 0;
+            var alphaMaskTexture = alphaMaskMode != 0 ? lilToonMaterial.GetTexture("_AlphaMask") as Texture2D : null;
+            var alphaMaskScale = ShaderUtility.HasProperty(lilToonMaterial, "_AlphaMaskScale")
+                ? lilToonMaterial.GetFloat("_AlphaMaskScale")
+                : 1f;
+            var alphaMaskValue = ShaderUtility.HasProperty(lilToonMaterial, "_AlphaMaskValue")
+                ? lilToonMaterial.GetFloat("_AlphaMaskValue")
+                : 0f;
+            // 注意：遮罩贴图**没挂**也要算"用了遮罩"。
+            // lilToon 采样 _AlphaMask 时，没设置过的属性用的是 shader 里声明的默认贴图（"white" = 1），
+            // 所以这时 scale/value 依然生效 —— `_AlphaMaskValue = -0.33` 就是"整体透明度 −33%"，
+            // 很多半透明材质（smooth white planet / ring 之类）就是靠这个值，并不需要遮罩贴图。
+            var alphaMaskUsed = alphaMaskMode != 0;
+
             var tintChanged = !Mathf.Approximately(tint.r, 1f) || !Mathf.Approximately(tint.g, 1f) ||
                               !Mathf.Approximately(tint.b, 1f) || !Mathf.Approximately(tint.a, 1f);
             var toneChanged = !Mathf.Approximately(hsvg.x, 0f) || !Mathf.Approximately(hsvg.y, 1f) ||
                               !Mathf.Approximately(hsvg.z, 1f) || !Mathf.Approximately(hsvg.w, 1f);
             var gradationUsed = gradationTexture != null && gradationStrength > 0f;
 
-            // 主色、色调校正（HSV/Gamma）、渐变映射都是默认值时，直接沿用原贴图。
-            if (!tintChanged && !toneChanged && !gradationUsed)
+            // 主色、色调校正（HSV/Gamma）、渐变映射都是默认值、也没用透明遮罩时，直接沿用原贴图。
+            if (!tintChanged && !toneChanged && !gradationUsed && !alphaMaskUsed)
             {
-                log.Mapped("_MainTex（主色 / 色调校正都是默认值）", "_BaseTexture（保留原贴图）");
-                return null;
-            }
-
-            if (!TryReadPixels(source, out var pixels, out var width, out var height, log, "the base texture"))
-            {
-                log.Warn("主色 / 色调校正需要烘焙，但基础贴图读取失败，这些设置没有烘焙进去。" +
-                         "请手动设置转换后材质的颜色，或在贴图上勾选 Read/Write。");
+                log.Mapped(usesDefaultWhite
+                        ? "_MainTex 未指定（lilToon 用 shader 默认白贴图）"
+                        : "_MainTex（主色 / 色调校正都是默认值）",
+                    usesDefaultWhite ? "_BaseTexture（保持默认白）" : "_BaseTexture（保留原贴图）");
                 return null;
             }
 
@@ -167,10 +186,58 @@ namespace NonToonSwitcher
                 !TryReadPixels(gradationTexture, out gradationPixels, out gradationWidth, out _, null, "the gradation map"))
                 gradationPixels = null;
 
+            Color[] alphaMaskPixels = null;
+            var alphaMaskWidth = 0;
+            var alphaMaskHeight = 0;
+            var alphaMaskScaleUv = Vector2.one;
+            var alphaMaskOffsetUv = Vector2.zero;
+            if (alphaMaskUsed && alphaMaskTexture != null)
+            {
+                if (TryReadPixels(alphaMaskTexture, out alphaMaskPixels, out alphaMaskWidth, out alphaMaskHeight, null,
+                        "the alpha mask"))
+                {
+                    // lilToon 采样透明遮罩时用的是主 UV 过一遍 _AlphaMask_ST
+                    alphaMaskScaleUv = lilToonMaterial.GetTextureScale("_AlphaMask");
+                    alphaMaskOffsetUv = lilToonMaterial.GetTextureOffset("_AlphaMask");
+                }
+                else
+                {
+                    alphaMaskPixels = null;
+                    log.Warn("lilToon 的透明遮罩（_AlphaMask）贴图读取失败：请给它勾上 Read/Write。" +
+                             "这次按默认白遮罩（= 1）计算，遮罩里压暗的部分没有烘进去。");
+                }
+            }
+            else if (alphaMaskUsed)
+            {
+                log.Mapped("透明遮罩（_AlphaMaskMode " + alphaMaskMode + "）没有挂遮罩贴图",
+                    "按 lilToon 的默认白遮罩（= 1）计算 scale/value，" +
+                    "即整体透明度偏移 " + alphaMaskValue.ToString("0.###"));
+            }
+
+            // 取基础像素：正常情况读原贴图；源材质没挂主贴图时用白底（对应 lilToon 的默认白贴图），
+            // 尺寸跟着透明遮罩走，这样遮罩的逐像素差异不会丢。
+            Color[] pixels;
+            int width;
+            int height;
+            if (usesDefaultWhite)
+            {
+                width = alphaMaskPixels != null && alphaMaskWidth > 0 ? alphaMaskWidth : 4;
+                height = alphaMaskPixels != null && alphaMaskHeight > 0 ? alphaMaskHeight : 4;
+                pixels = new Color[width * height];
+                for (var i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
+                log.Mapped("_MainTex 未指定（lilToon 用 shader 默认白贴图）", "以白底贴图烘焙主色 / 透明遮罩");
+            }
+            else if (!TryReadPixels(source, out pixels, out width, out height, log, "the base texture"))
+            {
+                log.Warn("主色 / 色调校正 / 透明遮罩需要烘焙，但基础贴图读取失败，这些设置没有烘焙进去。" +
+                         "请手动设置转换后材质的颜色，或在贴图上勾选 Read/Write。");
+                return null;
+            }
+
             // 贴图是不是 sRGB，决定要不要先线性化再算 —— 和 shader 里采样后的空间保持一致，
             // 否则 Gamma 那一步（pow）在 sRGB 数值上算出来的结果会明显不对。
             var sourceIsSrgb = true;
-            var sourcePath = AssetDatabase.GetAssetPath(source);
+            var sourcePath = source != null ? AssetDatabase.GetAssetPath(source) : null;
             if (!string.IsNullOrEmpty(sourcePath) && AssetImporter.GetAtPath(sourcePath) is TextureImporter sourceImporter)
                 sourceIsSrgb = sourceImporter.sRGBTexture;
             var linearWork = PlayerSettings.colorSpace == ColorSpace.Linear && sourceIsSrgb;
@@ -201,8 +268,34 @@ namespace NonToonSwitcher
                 if (rgb.x > 1f || rgb.y > 1f || rgb.z > 1f) hdrClipped = true;
                 if (linearWork) rgb = new Vector3(LinearToSrgb(rgb.x), LinearToSrgb(rgb.y), LinearToSrgb(rgb.z));
 
-                pixels[i] = new Color(Mathf.Clamp01(rgb.x), Mathf.Clamp01(rgb.y), Mathf.Clamp01(rgb.z),
-                    Mathf.Clamp01(pixel.a * tint.a));
+                // 透明遮罩：lilToon 是在主色之后、cutout 之前改 alpha 的，这里照同样的顺序烘进去。
+                var alpha = Mathf.Clamp01(pixel.a * tint.a);
+                if (alphaMaskUsed)
+                {
+                    // 有遮罩贴图就按 UV 采样（过 _AlphaMask_ST），没挂贴图时就是 shader 默认的白贴图 = 1
+                    var maskValue = 1f;
+                    if (alphaMaskPixels != null && alphaMaskWidth > 0 && alphaMaskHeight > 0)
+                    {
+                        var u = width > 0 ? (i % width + 0.5f) / width : 0f;
+                        var v = width > 0 && height > 0 ? (i / width + 0.5f) / height : 0f;
+                        u = Mathf.Repeat(u * alphaMaskScaleUv.x + alphaMaskOffsetUv.x, 1f);
+                        v = Mathf.Repeat(v * alphaMaskScaleUv.y + alphaMaskOffsetUv.y, 1f);
+                        var mx = Mathf.Clamp((int)(u * alphaMaskWidth), 0, alphaMaskWidth - 1);
+                        var my = Mathf.Clamp((int)(v * alphaMaskHeight), 0, alphaMaskHeight - 1);
+                        maskValue = alphaMaskPixels[my * alphaMaskWidth + mx].r;
+                    }
+
+                    var maskAlpha = Mathf.Clamp01(maskValue * alphaMaskScale + alphaMaskValue);
+                    switch (alphaMaskMode)
+                    {
+                        case 1: alpha = maskAlpha; break;                          // 用遮罩替换 alpha
+                        case 2: alpha = alpha * maskAlpha; break;                 // 相乘
+                        case 3: alpha = Mathf.Clamp01(alpha + maskAlpha); break;   // 相加
+                        case 4: alpha = Mathf.Clamp01(alpha - maskAlpha); break;   // 相减
+                    }
+                }
+
+                pixels[i] = new Color(Mathf.Clamp01(rgb.x), Mathf.Clamp01(rgb.y), Mathf.Clamp01(rgb.z), alpha);
             }
 
             var name = ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Base.png";
@@ -224,8 +317,10 @@ namespace NonToonSwitcher
                 AssetImporter.GetAtPath(sourcePath) is TextureImporter originalImporter)
             {
                 importer.sRGBTexture = originalImporter.sRGBTexture;
-                importer.alphaSource = originalImporter.alphaSource;
-                importer.alphaIsTransparency = originalImporter.alphaIsTransparency;
+                importer.alphaSource = alphaMaskPixels != null
+                    ? TextureImporterAlphaSource.FromInput      // 透明遮罩烘进了 alpha，必须真的导入 alpha
+                    : originalImporter.alphaSource;
+                importer.alphaIsTransparency = alphaMaskPixels != null || originalImporter.alphaIsTransparency;
                 importer.mipmapEnabled = originalImporter.mipmapEnabled;
                 importer.streamingMipmaps = originalImporter.streamingMipmaps;
                 importer.maxTextureSize = originalImporter.maxTextureSize;
@@ -243,6 +338,10 @@ namespace NonToonSwitcher
             if (gradationPixels != null) what.Add("渐变映射 " + gradationStrength.ToString("0.###"));
             if (maskPixels != null) what.Add("色调校正遮罩");
             if (tintChanged) what.Add("主色 " + tint);
+            if (alphaMaskUsed)
+                what.Add("透明遮罩（模式 " + alphaMaskMode + "，scale " + alphaMaskScale.ToString("0.###") +
+                         " / value " + alphaMaskValue.ToString("0.###") +
+                         (alphaMaskPixels == null ? "，未挂贴图按白=1" : "") + "）→ Alpha");
             log.Mapped("_MainTex + " + string.Join(" + ", what.ToArray()), "_BaseTexture（已烘焙 PNG）");
 
             if (hdrClipped)

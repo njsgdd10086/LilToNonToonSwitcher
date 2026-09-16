@@ -26,6 +26,7 @@ namespace NonToonSwitcher
         [SerializeField] private bool bakeGradients = true;
         [SerializeField] private bool logToConsole = true;
         [SerializeField] private float outlineZOffsetFactor = DefaultOutlineZOffsetFactor;
+        [SerializeField] private float outlineWidthFactor = 1f;
         [SerializeField] private ReplaceMode replaceMode = ReplaceMode.Switch;
 
         /// <summary>lilToon 描边宽度贴图的补偿：描边整体后移 = 描边宽度 × 0.01 × 这个倍数。</summary>
@@ -126,6 +127,17 @@ namespace NonToonSwitcher
         {
             get { return Mathf.Clamp(outlineZOffsetFactor, 0f, 10f); }
             set { outlineZOffsetFactor = Mathf.Clamp(value, 0f, 10f); SaveSettings(); }
+        }
+
+        /// <summary>
+        /// 描边宽度的整体手动倍数（默认 1 = 不改）。
+        /// 自动的部分是"按使用该材质的对象世界缩放折算"（因为 lilToon 的描边偏移在物体空间、
+        /// NonToon 在世界空间），这个倍数是在那之上再乘一次，用来整体调粗细。
+        /// </summary>
+        public float OutlineWidthFactor
+        {
+            get { return Mathf.Clamp(outlineWidthFactor, 0f, 5f); }
+            set { outlineWidthFactor = Mathf.Clamp(value, 0f, 5f); SaveSettings(); }
         }
 
         private void SaveSettings()

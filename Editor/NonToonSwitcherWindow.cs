@@ -162,6 +162,13 @@ namespace NonToonSwitcher
                         "转换时把描边整体后移「描边宽度 × 0.01 × 这个倍数」来避开：1 = 与描边自身宽度同量级（默认）；" +
                         "0 = 不处理；觉得描边被推得太淡就调小。"),
                     settings.OutlineZOffsetFactor, 0f, 3f);
+                settings.OutlineWidthFactor = EditorGUILayout.Slider(
+                    new GUIContent("描边宽度倍数",
+                        "整体调整 NonToon 描边粗细的手动倍数（默认 1 = 不改，重新转换后生效）。\n" +
+                        "自动部分：lilToon 的描边偏移加在物体空间（会被对象缩放缩放），NonToon 加在世界空间，" +
+                        "所以转换时会自动按「使用该材质的对象世界缩放」折算；这个倍数是在那之上再乘一次。\n" +
+                        "描边偏粗就调小（0.5 上下），偏细就调大。"),
+                    settings.OutlineWidthFactor, 0f, 2f);
                 settings.LogToConsole = EditorGUILayout.Toggle("输出日志到 Console", settings.LogToConsole);
                 EditorGUI.indentLevel--;
             }

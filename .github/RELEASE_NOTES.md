@@ -1,52 +1,61 @@
-**LilToNonToon Switcher 1.1.3** —— 修掉 1.1.2 里描边后移的**误判触发**，并把「为什么没后移」写进转换日志。
+**LilToNonToon Switcher 1.1.4** —— 修掉「半透明轻纱转完变实心」和「描边粗细和 lilToon 不一致」，并新增**描边宽度倍数**。
 
-## 修复：没用到宽度遮罩的材质被白白后移了描边
+## 一、修复：半透明的轻纱 / 薄片转完变成实心
 
-1.1.2 判断"源材质有没有用描边宽度贴图"时只看了这一行：
+lilToon 的**透明遮罩**（`_AlphaMaskMode`）是**直接改 alpha** 的：
 
-```csharp
-if (source.GetTexture("_OutlineWidthMask") == null) return;
+```hlsl
+alphaMask = saturate(_AlphaMask.r * _AlphaMaskScale + _AlphaMaskValue);
+mode 1 替换 / mode 2 相乘 / mode 3 相加 / mode 4 相减
 ```
 
-问题在于：Unity 对**没设置过**的贴图属性会返回 shader 里声明的**默认贴图**（lilToon 声明的是 `"white"`），
-那**不是 null**。所以那些 .mat 里压根没写这个属性、根本没用宽度遮罩的材质，也会被当成"用了遮罩"而后移描边。
+而 NonToon 没有这个功能（`_SharedMask` 只喂给各模块做范围遮罩，改不了 alpha），所以这条链现在会**按同样的顺序烘进 `_BaseTexture` 的 Alpha**（主色 → 透明遮罩 → …），遮罩按它自己的 tiling/offset 采样，并把导入设置钉成 `alphaSource = FromInput`。
 
-实测（liltonon 工程里 24 个 lilToon 材质）：
+顺手修掉两个会让烘焙**静默跳过**的情况：
 
-| 状态 | 数量 | 1.1.2 的行为 | 1.1.3 的行为 |
-| --- | --- | --- | --- |
-| `_OutlineWidthMask` 挂了真实 PNG | 15 | 后移 ✅ | 后移 ✅ |
-| 槽位是空的（`m_Texture: {fileID: 0}`） | 7 | 不处理 ✅ | 不处理 ✅ |
-| **连属性都没写进 .mat** | **2** | **误判后移 ❌** | 不处理 ✅ |
+| 情况 | 以前 | 现在 |
+| --- | --- | --- |
+| **遮罩贴图没挂**（`fileID: 0`） | 判定为"没用遮罩"，整段跳过 | 算"用了遮罩"：lilToon 采样没设置过的贴图属性用的是 shader 默认白贴图（= 1），所以 `_AlphaMaskValue` 就是「整体透明度偏移」 |
+| **主贴图没挂**（`_MainTex = fileID: 0`） | 烘焙器第一句就静默返回 | 以**白底贴图**参与烘焙，把算好的 Alpha 带出来 |
 
-现在会排除所有内置默认贴图（`whiteTexture` / `blackTexture` / `grayTexture` / `normalTexture` 等），
-**只有真的挂了 PNG 才算数**。
-
-> 之前被误判的材质，重新转换一次就会恢复：转换会把 `_OutlineZOffset` 按源材质的 `_OutlineZBias`（通常是 0）重写一遍。
-
-## 新增：日志说明每个材质的结果
-
-凡是"源材质挂了宽度贴图"的材质，转换报告里都会写清结果与原因：
+实测：
 
 ```
-· 描边宽度贴图（NonToon 没有这个功能） -> 描边整体后移 0.0007（_OutlineZOffset，倍数 1 × 描边宽度）…
-· 描边宽度贴图（NonToon 没有这个功能） -> 描边宽度为 0，本来就没有描边，未做后移
-· 描边宽度贴图（NonToon 没有这个功能） -> 后移倍数 = 0，未做处理（描边可能盖住嘴唇 / 眼睛）
-· 描边宽度贴图（NonToon 没有这个功能） -> 原有 _OutlineZOffset 0.001 已经不小于后移量，保持不动
+smooth white  planet_nontoon_Base.png   alpha 均值 = 0.6706   ← saturate(1×1 + (−0.33)) = 0.67 ✓
+smooth white  ring_nontoon_Base.png     alpha 均值 = 0.6764（遮罩逐像素 × 0.73，黑区 alpha=0 与 lilToon 一致）✓
 ```
 
-没挂宽度贴图的材质**不会**打印这一行 —— 也就是 **日志里没有这一行 = 没用宽度遮罩 = 不需要处理**。
+遮罩贴图读不出来（没勾 Read/Write）时会**警告**并按默认白遮罩（= 1）计算，而不是整段丢掉。
 
-## 什么情况下 `_OutlineZOffset` 会保持 0
+## 二、修复：描边粗细和 lilToon 不一致
 
-1. 源材质没挂宽度贴图（最常见，这种材质 lilToon / NonToon 的描边行为本来就一样）；
-2. `_OutlineWidth` 是 0 / 负数（本来就没有描边）；
-3. 后移倍数被设成 0（菜单 `描边后移倍数 > 0（不处理）`）；
-4. 材质原有的 `_OutlineZOffset` 已经 ≥ 算出来的后移量（不覆盖更大的值）。
+两个 shader 的描边偏移**不在同一个空间**：
+
+```
+lilToon ：positionOS += outlineN * (_OutlineWidth * 0.01 * 宽度贴图)   → 过物体矩阵，会被对象缩放缩放
+NonToon ：vertex.position（已是世界空间）+= outlineN * _OutlineWidth * 0.01 → 不受对象缩放影响
+```
+
+所以对象一旦被缩放，NonToon 的描边就会等比例偏粗/偏细。现在转换时按「使用该材质的渲染器」的**世界缩放**折算 `_OutlineWidth`（缩放 ≈ 1 时等于不改），同一材质被不同缩放共用时会警告并取平均，日志里会写明：
+
+```
+· 描边宽度  ->  0.07 → 0.021（对象缩放 0.3 × 手动倍数 1）
+```
+
+## 三、新增：描边宽度倍数（手动系数）
+
+- 菜单 `Tools > LilToNonToon Switcher > 描边宽度倍数 >` → `0.25 / 0.5 / 0.75 / 1（默认） / 1.5`
+- 设置窗口「高级设置」→ 滑条 0–2
+- 最终公式：`描边宽度 = 原值 × 对象世界缩放 × 这个倍数`（改完重新转换后生效）
+
+## 四、已知限制
+
+lilToon 的 `_OutlineFixWidth` 会在**相机距离小于 1 米**时把描边按 `× saturate(距离)` 收窄（贴脸看最多细 20~30%）；NonToon 的描边没有随距离变化的机制，所以**极度贴近看**时 NonToon 仍会略粗一点。正常距离两者一致；需要的话用「描边宽度倍数」按材质补。
 
 ## 升级后
 
-ALCOM 更新到 1.1.3 → 把之前被描边问题影响的材质重新转换一次即可。
+1. ALCOM 更新到 1.1.4；
+2. 把轻纱 / 薄片 / 描边相关的材质**重新转换一次**（会覆盖同名的 `_nontoon.mat`，原 lilToon 材质不动）。
 
 ## 安装 / 升级
 

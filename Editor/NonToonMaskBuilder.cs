@@ -58,6 +58,18 @@ namespace NonToonSwitcher
                 if (source.RequireToggle && ShaderUtility.HasProperty(lilToonMaterial, source.ToggleProperty) &&
                     lilToonMaterial.GetFloat(source.ToggleProperty) == 0f) continue;
 
+                // lilToon 的透明遮罩是改 alpha 的，NonToon 的共享遮罩改不了 alpha ——
+                // 它的效果已经由贴图烘焙器写进基础贴图的 Alpha 了，这里不用再占一个通道。
+                if (source.LilToonProperty == "_AlphaMask" &&
+                    ShaderUtility.HasProperty(lilToonMaterial, "_AlphaMaskMode") &&
+                    Mathf.RoundToInt(lilToonMaterial.GetFloat("_AlphaMaskMode")) != 0)
+                {
+                    log.Mapped("lilToon 透明遮罩（_AlphaMaskMode " +
+                               Mathf.RoundToInt(lilToonMaterial.GetFloat("_AlphaMaskMode")) + "）",
+                        "已烘焙进 _BaseTexture 的 Alpha，未写入共享遮罩（NonToon 的遮罩不改 alpha）");
+                    continue;
+                }
+
                 var texture = lilToonMaterial.GetTexture(source.LilToonProperty) as Texture2D;
                 if (texture == null) continue;
 

@@ -149,7 +149,7 @@ namespace NonToonSwitcher
         /// <summary>Converts a single material into <paramref name="outputFolder"/> and returns the new asset.</summary>
         public static Material ConvertMaterial(Material source, string outputFolder, string preferredName,
             object locks, bool bakeSharedMask, bool bakeBaseTexture, ConversionLog log,
-            string assetPath = null)
+            string assetPath = null, float outlineScale = 1f)
         {
             var folderLocks = locks as FolderLocks;
             var shader = ShaderUtility.FindNonToonShader();
@@ -189,6 +189,7 @@ namespace NonToonSwitcher
             ApplyMappings(source, target, log);
             ApplyRenderingMode(source, target, log);
             ApplyVertexColorFlags(source, target, log);
+            ApplyOutlineWidth(source, target, outlineScale, log);
             ApplyOutlineWidthMaskWorkaround(source, target, log);
 
             // Integer properties do not survive a plain SetInt on Shader Core shaders, so they are written
@@ -790,8 +791,10 @@ namespace NonToonSwitcher
                 foreach (var material in allSources)
                 {
                     var log = new ConversionLog { Source = material };
+                    // 描边宽度要按「用到这个材质的渲染器」的世界缩放折算（两个 shader 的偏移空间不同）
+                    var outlineScale = OutlineScaleFactorFor(material, renderers, log);
                     ConvertMaterial(material, folder, material.name, locks,
-                        request.BakeSharedMask, request.BakeBaseTexture, log, paths[material]);
+                        request.BakeSharedMask, request.BakeBaseTexture, log, paths[material], outlineScale);
                     logs.Add(log);
                 }
             }
@@ -1120,6 +1123,81 @@ namespace NonToonSwitcher
             }
             parts.Reverse();
             return string.Join("/", parts.ToArray());
+        }
+
+        /// <summary>
+        /// 描边宽度补偿。
+        ///
+        /// 两个 shader 的描边偏移不在同一个空间里：
+        ///   · lilToon：`positionOS += outlineN * _OutlineWidth * 0.01`，加在**物体空间**，
+        ///     最后要过物体矩阵 —— 于是世界空间的描边粗细 = 材质宽度 × 对象缩放；
+        ///   · NonToon：`vertex.position` 已经是 `mul(SC_O2W(), v.vertex)`（世界空间），
+        ///     再 `+= outlineN * _OutlineWidth * 0.01` —— 世界空间直接加，**不受对象缩放影响**。
+        ///
+        /// 所以对象一旦被缩放（衣服/配件很常见），NonToon 的描边就会等比例偏粗或偏细。
+        /// 这里按使用该材质的渲染器的世界缩放折算回去（缩放 ≈ 1 时等于不改），
+        /// 再乘上项目设置里的「描边宽度倍数」让作者可以整体微调。
+        /// </summary>
+        private static void ApplyOutlineWidth(Material source, Material target, float outlineScale, ConversionLog log)
+        {
+            if (target == null || !ShaderUtility.HasProperty(target, "_OutlineWidth")) return;
+
+            var manual = NonToonSwitcherSettings.instance.OutlineWidthFactor;
+            var factor = manual * (outlineScale > 0f ? outlineScale : 1f);
+            if (Mathf.Approximately(factor, 1f)) return;
+
+            var width = target.GetFloat("_OutlineWidth");
+            if (width <= 0f) return;
+
+            var scaled = width * factor;
+            ShaderUtility.SetFloatValue(target, "_OutlineWidth", scaled);
+            log.Mapped("描边宽度", width.ToString("0.####") + " → " + scaled.ToString("0.####") +
+                "（对象缩放 " + outlineScale.ToString("0.###") + " × 手动倍数 " + manual.ToString("0.###") + "）");
+        }
+
+        /// <summary>
+        /// 材质被哪些渲染器用到、这些渲染器的世界缩放平均是多少。
+        /// 同一个材质被不同缩放的对象共用时给出警告（只能取平均，个别对象可能不准）。
+        /// </summary>
+        private static float OutlineScaleFactorFor(Material material, List<Renderer> renderers, ConversionLog log)
+        {
+            if (material == null || renderers == null || renderers.Count == 0) return 1f;
+
+            var total = 0f;
+            var count = 0;
+            var min = float.MaxValue;
+            var max = 0f;
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null) continue;
+
+                var uses = false;
+                var slots = renderer.sharedMaterials;
+                for (var i = 0; i < slots.Length; i++)
+                {
+                    if (slots[i] == material) { uses = true; break; }
+                }
+                if (!uses) continue;
+
+                var scale = renderer.transform.lossyScale;
+                var average = (Mathf.Abs(scale.x) + Mathf.Abs(scale.y) + Mathf.Abs(scale.z)) / 3f;
+                total += average;
+                count++;
+                if (average < min) min = average;
+                if (average > max) max = average;
+            }
+
+            if (count == 0) return 1f;
+            var factor = total / count;
+            if (factor <= 0.0001f) return 1f;
+
+            if (max > min * 1.25f)
+            {
+                log.Warn("同一个材质被不同缩放的对象共用（世界缩放 " + min.ToString("0.###") + " ~ " +
+                         max.ToString("0.###") + "），描边宽度按平均值 " + factor.ToString("0.###") + " 折算；" +
+                         "如果某个对象上描边明显偏粗或偏细，请给它单独复制一份材质。");
+            }
+            return factor;
         }
 
         /// <summary>Applies the recorded assignments to the renderers.</summary>

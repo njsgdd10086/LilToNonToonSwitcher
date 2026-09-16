@@ -2,6 +2,52 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.4] - 2026-09-17
+
+### 修复
+
+- **半透明的轻纱 / 薄片材质转完变成实心**：lilToon 的「透明遮罩」（`_AlphaMaskMode`）是**直接改 alpha** 的
+  （mode 1 替换，2 相乘，3 相加，4 相减，遮罩值先过 `_AlphaMaskScale` / `_AlphaMaskValue`），
+  而 NonToon 没有这个功能（`_SharedMask` 只喂给各模块做范围遮罩，改不了 alpha）。
+  现在整条链会按 lilToon 的公式烘进 `_BaseTexture` 的 Alpha（顺序也一致：主色 → 透明遮罩 → …），
+  遮罩按它自己的 tiling/offset 采样；只要用了透明遮罩就强制烘焙，并把导入设置钉成 `alphaSource = FromInput`。
+
+  顺手修掉两个会静默跳过烘焙的情况：
+
+  - **遮罩贴图没挂**时也算"用了遮罩" —— lilToon 采样没设置过的贴图属性用的就是 shader 里的默认白贴图（= 1），
+    所以 `_AlphaMaskValue` 本身就是「整体透明度偏移」（例如 `smooth white planet` 的 −0.33 = alpha × 0.67）。
+    以前要求"必须挂了贴图"，正好把这类材质全部跳过，于是它们转换后是实心的。
+  - **源材质没挂主贴图**（`_MainTex` = `fileID 0`，lilToon 用默认白贴图）时，以前烘焙器第一句就静默返回。
+    现在改为「以白底贴图参与烘焙」，把算好的 Alpha 带出来。
+
+  遮罩贴图读不出来（没勾 Read/Write）时会警告并按默认白遮罩（= 1）计算，而不是整段丢掉。
+
+- **描边粗细和 lilToon 不一致**：两个 shader 的描边偏移不在同一个空间 ——
+
+  ```
+  lilToon ：positionOS += outlineN * (_OutlineWidth * 0.01 * 宽度贴图)   然后过物体矩阵 → 会被对象缩放缩放
+  NonToon ：vertex.position（已是世界空间）+= outlineN * _OutlineWidth * 0.01 → 不受对象缩放影响
+  ```
+
+  所以对象一旦被缩放，NonToon 的描边就会等比例偏粗/偏细。现在转换时按「使用该材质的渲染器」的
+  **世界缩放**折算 `_OutlineWidth`（缩放 ≈ 1 时等于不改），同一材质被不同缩放共用时会警告并取平均。
+
+### 新增
+
+- **描边宽度倍数**（手动系数，默认 1，重新转换后生效）：
+  菜单 `Tools > LilToNonToon Switcher > 描边宽度倍数 >`（`0.25 / 0.5 / 0.75 / 1 / 1.5`），
+  设置窗口「高级设置」里也有 0–2 的滑条。
+  最终公式：`描边宽度 = 原值 × 对象世界缩放 × 这个倍数`。
+- 转换日志会写明描边补偿的实际数值，例如：
+  ```
+  · 描边宽度  ->  0.07 → 0.021（对象缩放 0.3 × 手动倍数 1）
+  ```
+
+### 已知限制（写进 README）
+
+- lilToon 的 `_OutlineFixWidth` 会在**相机距离小于 1 米**时把描边按 `× saturate(距离)` 收窄，
+  NonToon 的描边没有随距离变化的机制，所以贴脸看时 NonToon 仍会略粗一点；用「描边宽度倍数」可以按材质补偿。
+
 ## [1.1.3] - 2026-09-16
 
 ### 修复

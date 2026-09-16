@@ -214,6 +214,63 @@ namespace NonToonSwitcher
             return true;
         }
 
+        // ------------------------------------------------------------------ 描边宽度倍数
+        //
+        // 自动部分：NonToon 的描边偏移在世界空间、lilToon 在物体空间，转换时会按
+        // 「使用该材质的对象世界缩放」折算。这里是在那之上再乘一次，用来整体调描边粗细。
+
+        private const string OutlineWidthRoot = "Tools/LilToNonToon Switcher/描边宽度倍数/";
+        private static readonly float[] OutlineWidths = { 0.25f, 0.5f, 0.75f, 1f, 1.5f };
+        private static readonly string[] OutlineWidthNames = { "0.25", "0.5", "0.75", "1（默认）", "1.5" };
+
+        [MenuItem(OutlineWidthRoot + "0.25", false, 170)]
+        private static void OutlineWidth025() { SetOutlineWidth(0.25f); }
+
+        [MenuItem(OutlineWidthRoot + "0.5", false, 171)]
+        private static void OutlineWidth05() { SetOutlineWidth(0.5f); }
+
+        [MenuItem(OutlineWidthRoot + "0.75", false, 172)]
+        private static void OutlineWidth075() { SetOutlineWidth(0.75f); }
+
+        [MenuItem(OutlineWidthRoot + "1（默认）", false, 173)]
+        private static void OutlineWidth1() { SetOutlineWidth(1f); }
+
+        [MenuItem(OutlineWidthRoot + "1.5", false, 174)]
+        private static void OutlineWidth15() { SetOutlineWidth(1.5f); }
+
+        private static void SetOutlineWidth(float value)
+        {
+            NonToonSwitcherSettings.instance.OutlineWidthFactor = value;
+            Debug.Log("[LilToNonToon] 描边宽度倍数 = " + value.ToString("0.##") +
+                      "（转换时描边宽度 = 原值 × 对象世界缩放 × 这个倍数）。重新转换后生效。");
+        }
+
+        [MenuItem(OutlineWidthRoot + "0.25", true, 170)]
+        private static bool OutlineWidth025Validate() { return MarkOutlineWidth(); }
+
+        [MenuItem(OutlineWidthRoot + "0.5", true, 171)]
+        private static bool OutlineWidth05Validate() { return MarkOutlineWidth(); }
+
+        [MenuItem(OutlineWidthRoot + "0.75", true, 172)]
+        private static bool OutlineWidth075Validate() { return MarkOutlineWidth(); }
+
+        [MenuItem(OutlineWidthRoot + "1（默认）", true, 173)]
+        private static bool OutlineWidth1Validate() { return MarkOutlineWidth(); }
+
+        [MenuItem(OutlineWidthRoot + "1.5", true, 174)]
+        private static bool OutlineWidth15Validate() { return MarkOutlineWidth(); }
+
+        private static bool MarkOutlineWidth()
+        {
+            var current = NonToonSwitcherSettings.instance.OutlineWidthFactor;
+            for (var i = 0; i < OutlineWidths.Length; i++)
+            {
+                Menu.SetChecked(OutlineWidthRoot + OutlineWidthNames[i],
+                    Mathf.Abs(current - OutlineWidths[i]) < 0.001f);
+            }
+            return true;
+        }
+
         public static ConvertRequest BuildRequestFromSettings(NonToonSwitcherSettings settings, bool createSwitcher)
         {
             var mode = settings.ReplaceMode;

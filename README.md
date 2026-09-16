@@ -154,6 +154,7 @@ Assets/NonToonConverted/衣服/
 | `Tools > LilToNonToon Switcher > 转换方式 > 直接替换成 NonToon（原地替换）` | ✅ 打勾＝原地换材质，不建开关（回退只能靠 Ctrl+Z） |
 | `Tools > LilToNonToon Switcher > 转换方式 > 复制一份 _nontoon 后替换（原对象取消勾选）` | ✅ 打勾＝复制一份 `<名字>_nontoon` 换成 NonToon，原对象取消勾选（可回退） |
 | `Tools > LilToNonToon Switcher > 描边后移倍数 > 0 / 0.5 / 1 / 1.5 / 2` | ✅ 打勾＝当前倍数（默认 1）。只影响"源材质挂了描边宽度贴图"的材质，详见下面「描边宽度贴图」一节 |
+| `Tools > LilToNonToon Switcher > 描边宽度倍数 > 0.25 / 0.5 / 0.75 / 1 / 1.5` | ✅ 打勾＝当前倍数（默认 1）。整体调描边粗细：`原值 × 对象世界缩放 × 这个倍数`，详见「描边宽度」一节 |
 | `Tools > LilToNonToon Switcher > 环境检查` | 输出 lilToon / NonToon / MA 的安装情况到 Console |
 | `Tools > LilToNonToon Switcher > 导出为 unitypackage` | 源码放在 `Assets/LilToNonToonSwitcher` 时可重新打包 |
 
@@ -184,7 +185,7 @@ Assets/NonToonConverted/衣服/
 | 渲染模式（`_TransparentMode` 或 shader 名） | `_RenderingMode` + Blend / Queue / ZWrite | 先按 **shader 名字**判断（lilToon 选了模式后材质会换成 `Hidden/lilToonCutout`、`Hidden/lilToonTransparentOutline`、`Hidden/lilToonTwoPassTransparent` 这类隐藏变体，那些材质的 `_TransparentMode` 常常还是 0），再退回属性。`_RenderingMode` 只决定 NonToon 怎么处理 Alpha（不透明强制 1 / 镂空做剪切 / 透明保留）；混合方式、`_ZWrite`、`_Cull`、`_AlphaToMask`、渲染队列**沿用原材质**（lilToon 这些值都是材质驱动的，作者常故意调成「透明混合但写深度、待在几何队列」，例如 MANUKA 的脸和头发），原材质没有这些属性时才用 NonToon 自己的模式默认值 |
 | `_OutlineColor` / `_OutlineWidth` / `_OutlineZBias` | `_OutlineColor` / `_OutlineWidth` / `_OutlineZOffset` | 近似复制；源材质挂了 `_OutlineWidthMask` 时另外把描边后移（见「描边宽度贴图」） |
 | `_OutlineVertexR2Width` | `_OutlineFromVertexColor` | 用顶点色控制描边宽度 |
-| `_AlphaMask` | `_SharedMask`（对应通道） | 烘焙进共享遮罩 |
+| `_AlphaMask`（`_AlphaMaskMode` 1/2/3/4 + scale/value） | `_BaseTexture` 的 Alpha | **烘焙进基础贴图的 Alpha**（NonToon 的共享遮罩改不了 alpha）：按 lilToon 的顺序算「主色 → 透明遮罩 → …」。遮罩没挂贴图时按 shader 默认白贴图（= 1）算，也就是 `_AlphaMaskValue` 当整体透明度偏移用。详见下面「透明遮罩」 |
 | `_RimColorTex` / `_BacklightColorTex` / `_MatCapBlendMask` / `_ReflectionColorTex` | `_SharedMask` | 读取各模块的 Mask Channel 设置，写进对应通道 |
 | `_ShadowColor` / `_Shadow2ndColor` / `_Shadow3rdColor` + Border | `_SharedGradients`（`.scgradients`）+ `_ShadeGradientIndex` | 生成阴影渐变 |
 | `_RimColor` / `_RimBorder` / `_RimBlur` | `_RimLightColor` / `_RimLightRange` | 由边界与模糊近似出 Range |
@@ -203,6 +204,28 @@ NonToon 0.1.x 里没有对应项的功能，**不会被悄悄丢掉**，而是�
 - Fur 的细节设置、Gem、Refraction
 - 描边的贴图（`_OutlineTex`）；宽度遮罩（`_OutlineWidthMask`）见下面「描边宽度贴图」
 
+### 透明遮罩（`_AlphaMask`）
+
+lilToon 的透明遮罩是**直接改 alpha** 的（不是"裁掉"）：
+
+```hlsl
+alphaMask = saturate(_AlphaMask.r * _AlphaMaskScale + _AlphaMaskValue);
+mode 1 替换 alpha / mode 2 相乘 / mode 3 相加 / mode 4 相减
+```
+
+NonToon 没有这个功能（`_SharedMask` 只喂给各模块做**范围**遮罩，改不了 alpha），所以转换时把这条链
+**按同样的顺序烘进 `_BaseTexture` 的 Alpha**（主色 → 透明遮罩 → …），遮罩按自己的 tiling/offset 采样，
+并把烘焙出的 PNG 导入设置钉成 `alphaSource = FromInput`。
+
+两种容易踩空的情况都处理了：
+
+| 情况 | 说明 |
+| --- | --- |
+| **遮罩贴图没挂**（`fileID: 0`） | 也算"用了遮罩"：lilToon 采样没设置过的贴图属性用的是 shader 默认白贴图（= 1），所以 `_AlphaMaskValue` 就是「整体透明度偏移」（例：−0.33 → alpha × 0.67），很多半透明薄片就靠这个值 |
+| **主贴图没挂**（`_MainTex = fileID: 0`） | 以**白底贴图**参与烘焙，把算好的 Alpha 带出来（以前会静默跳过，材质转完是实心的） |
+
+遮罩贴图读不出来（没勾 Read/Write）时会警告，并按默认白遮罩（= 1）计算，而不是整段丢掉。
+
 ### 描边宽度贴图（`_OutlineWidthMask`）
 
 NonToon 没有"逐像素描边宽度"这个功能，它的描边是**均匀**的反向外扩壳，所以这里做了一次补偿：
@@ -219,6 +242,33 @@ lilToon 的作者常用宽度遮罩把**嘴唇、眼睛附近的描边宽度压�
 倍数默认 **1**，可在 `转换方式` 同级的 `描边后移倍数` 菜单里选 `0 / 0.5 / 1 / 1.5 / 2`，
 或在设置窗口「高级设置」里用滑条（0–3）微调：调小＝描边更明显但凹处风险回升，调大＝更保险但描边可能被邻近几何吃掉，
 **0 = 不做处理**（回到会糊住嘴唇的旧行为）。
+
+### 描边宽度（缩放折算 + 手动倍数）
+
+两个 shader 的描边偏移**不在同一个空间**：
+
+```
+lilToon ：positionOS += outlineN * (_OutlineWidth * 0.01 * 宽度贴图)      → 之后过物体矩阵，会被对象缩放缩放
+NonToon ：vertex.position（已是世界空间）+= outlineN * _OutlineWidth * 0.01 → 不受对象缩放影响
+```
+
+所以对象一旦被缩放，NonToon 的描边就会等比例偏粗/偏细。转换时按「使用该材质的渲染器」的**世界缩放**
+折算 `_OutlineWidth`（缩放 ≈ 1 时等于不改；同一材质被不同缩放共用时会警告并取平均）：
+
+```
+描边宽度 = 原值 × 对象世界缩放 × 手动倍数
+```
+
+**手动倍数**在菜单 `Tools > LilToNonToon Switcher > 描边宽度倍数 >`（`0.25 / 0.5 / 0.75 / 1（默认） / 1.5`）
+或窗口「高级设置」的滑条（0–2）里调，改完重新转换后生效。日志会写明实际数值：
+
+```
+· 描边宽度  ->  0.07 → 0.021（对象缩放 0.3 × 手动倍数 1）
+```
+
+**已知限制**：lilToon 的 `_OutlineFixWidth` 会在相机距离小于 1 米时把描边按 `× saturate(距离)` 收窄
+（贴脸看最多细 20~30%），NonToon 的描边没有随距离变化的机制，所以极度贴近看时 NonToon 会略粗一点；
+正常距离两者一致，需要的话用「描边宽度倍数」按材质补。
 
 ### 什么时候会写这个值（什么时候保持 0）
 
