@@ -608,6 +608,25 @@ namespace NonToonSwitcher
         }
 
         /// <summary>
+        /// 源材质是不是真的用了描边宽度贴图。
+        /// 注意：没设置过的贴图属性会返回 shader 里声明的默认贴图（lilToon 是 "white"），
+        /// 那不是"作者用了遮罩"，要排除掉，否则没用到这个功能的材质也会被白白后移描边。
+        /// </summary>
+        private static bool UsesOutlineWidthMask(Material source)
+        {
+            if (!ShaderUtility.HasProperty(source, "_OutlineWidthMask")) return false;
+
+            var texture = source.GetTexture("_OutlineWidthMask");
+            if (texture == null) return false;
+            if (texture == Texture2D.whiteTexture || texture == Texture2D.blackTexture ||
+                texture == Texture2D.grayTexture || texture == Texture2D.linearGrayTexture ||
+                texture == Texture2D.normalTexture || texture == Texture2D.redTexture)
+                return false;
+
+            return true;
+        }
+
+        /// <summary>
         /// lilToon 的描边宽度贴图（`_OutlineWidthMask`）在 NonToon 里没有对应功能，而两者差别很大：
         /// 作者常用它把嘴唇、眼睛这些地方的描边宽度压成 0（描边壳不该出现在五官上），
         /// 但 NonToon 的描边是**均匀**的反向外扩壳，于是嘴腔内壁的外扩壳会照样画出来，
@@ -617,21 +636,32 @@ namespace NonToonSwitcher
         /// outline 顶点代码是 `pos += N * _OutlineWidth * 0.01 - V * _OutlineZOffset`，
         /// 正值就是往后推）。这样描边壳在跟脸面自身重叠的地方会被深度测试剔除，
         /// 剪影处的描边依旧保留。
+        ///
+        /// 只有下面几种情况**不会**写这个值（`_OutlineZOffset` 保持 0 或原值）：
+        ///   · 源材质的 `_OutlineWidthMask` 没挂贴图（最常见，等于没用这个功能）；
+        ///   · 描边宽度 `_OutlineWidth` 是 0 / 负数（本来就没有描边可推）；
+        ///   · 后移倍数被设成 0（用户主动关掉补偿）；
+        ///   · 材质原来的 `_OutlineZOffset` 已经比算出来的值大（不覆盖更大的值）。
+        /// 前两种是"没什么可做的"，后两种会在转换日志里写明原因。
         /// </summary>
         private static void ApplyOutlineWidthMaskWorkaround(Material source, Material target, ConversionLog log)
         {
             if (target == null) return;
             if (!ShaderUtility.HasProperty(target, "_OutlineZOffset")) return;
-            if (!ShaderUtility.HasProperty(source, "_OutlineWidthMask")) return;
-            if (source.GetTexture("_OutlineWidthMask") == null) return;
             if (!ShaderUtility.HasProperty(target, "_OutlineWidth")) return;
-
-            var width = target.GetFloat("_OutlineWidth");
-            if (width <= 0f) return;
+            if (!UsesOutlineWidthMask(source)) return;
 
             // 后移倍数是项目设置（默认 1 = 与描边自身宽度同量级），0 表示不做处理。
             var factor = NonToonSwitcherSettings.instance.OutlineZOffsetFactor;
+            var width = target.GetFloat("_OutlineWidth");
             var offset = width * 0.01f * factor;
+
+            if (width <= 0f)
+            {
+                log.Mapped("描边宽度贴图（NonToon 没有这个功能）", "描边宽度为 0，本来就没有描边，未做后移");
+                return;
+            }
+
             if (offset <= 0f)
             {
                 log.Mapped("描边宽度贴图（NonToon 没有这个功能）", "后移倍数 = 0，未做处理（描边可能盖住嘴唇 / 眼睛）");
@@ -639,7 +669,12 @@ namespace NonToonSwitcher
             }
 
             var current = ShaderUtility.HasProperty(target, "_OutlineZOffset") ? target.GetFloat("_OutlineZOffset") : 0f;
-            if (current >= offset) return;
+            if (current >= offset)
+            {
+                log.Mapped("描边宽度贴图（NonToon 没有这个功能）",
+                    "原有 _OutlineZOffset " + current.ToString("0.#####") + " 已经不小于后移量，保持不动");
+                return;
+            }
 
             ShaderUtility.SetFloatValue(target, "_OutlineZOffset", offset);
             log.Mapped("描边宽度贴图（NonToon 没有这个功能）",
