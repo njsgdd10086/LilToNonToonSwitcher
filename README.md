@@ -187,7 +187,7 @@ Assets/NonToonConverted/衣服/
 | `_OutlineVertexR2Width` | `_OutlineFromVertexColor` | 用顶点色控制描边宽度 |
 | `_AlphaMask`（`_AlphaMaskMode` 1/2/3/4 + scale/value） | `_BaseTexture` 的 Alpha | **烘焙进基础贴图的 Alpha**（NonToon 的共享遮罩改不了 alpha）：按 lilToon 的顺序算「主色 → 透明遮罩 → …」。遮罩没挂贴图时按 shader 默认白贴图（= 1）算，也就是 `_AlphaMaskValue` 当整体透明度偏移用。详见下面「透明遮罩」 |
 | `_RimColorTex` / `_BacklightColorTex` / `_MatCapBlendMask` / `_ReflectionColorTex` | `_SharedMask` | 读取各模块的 Mask Channel 设置，写进对应通道 |
-| `_ShadowColor` / `_Shadow2ndColor` / `_Shadow3rdColor` + Border | `_SharedGradients`（`.scgradients`）+ `_ShadeGradientIndex` | 生成阴影渐变 |
+| `_ShadowColor` / `_Shadow2ndColor` / `_Shadow3rdColor` + Border / Blur | `_SharedGradients`（`.scgradients`）+ `_ShadeGradientIndex` | 在 lilToon 的 `x = dotNL × 0.5 + 0.5` 空间里**按 lilToon 的公式采样 24 个关键点**：过渡窗口 `[border ± blur/2]`、阴影色的 alpha 当强度、`alpha ≈ 0` 的层跳过、受光端回白色 |
 | `_RimColor` / `_RimBorder` / `_RimBlur` | `_RimLightColor` / `_RimLightRange` | 由边界与模糊近似出 Range |
 | `_MatCapTex` / `_MatCapColor` / `_MatCapBlendMode` | `_MatCapMultiply*` / `_MatCapAdd*` | 按混合方式选择加算/乘算 |
 | `_ReflectionColor` | `_SpecularColor` | 原样复制（**不**乘 `_Reflectance`，否则高光会被压黑） |

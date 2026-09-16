@@ -1,61 +1,39 @@
-**LilToNonToon Switcher 1.1.4** —— 修掉「半透明轻纱转完变实心」和「描边粗细和 lilToon 不一致」，并新增**描边宽度倍数**。
+**LilToNonToon Switcher 1.1.5** —— 修掉「脸上出现硬边 + 阶梯状明暗分界」（脸颊一块灰蓝、分界线像台阶）。
 
-## 一、修复：半透明的轻纱 / 薄片转完变成实心
+## 原因
 
-lilToon 的**透明遮罩**（`_AlphaMaskMode`）是**直接改 alpha** 的：
+烘 lilToon 阴影色时，渐变的关键点**位置和软硬都不对**：
 
-```hlsl
-alphaMask = saturate(_AlphaMask.r * _AlphaMaskScale + _AlphaMaskValue);
-mode 1 替换 / mode 2 相乘 / mode 3 相加 / mode 4 相减
-```
-
-而 NonToon 没有这个功能（`_SharedMask` 只喂给各模块做范围遮罩，改不了 alpha），所以这条链现在会**按同样的顺序烘进 `_BaseTexture` 的 Alpha**（主色 → 透明遮罩 → …），遮罩按它自己的 tiling/offset 采样，并把导入设置钉成 `alphaSource = FromInput`。
-
-顺手修掉两个会让烘焙**静默跳过**的情况：
-
-| 情况 | 以前 | 现在 |
+| | 旧做法 | lilToon 的真实行为 |
 | --- | --- | --- |
-| **遮罩贴图没挂**（`fileID: 0`） | 判定为"没用遮罩"，整段跳过 | 算"用了遮罩"：lilToon 采样没设置过的贴图属性用的是 shader 默认白贴图（= 1），所以 `_AlphaMaskValue` 就是「整体透明度偏移」 |
-| **主贴图没挂**（`_MainTex = fileID: 0`） | 烘焙器第一句就静默返回 | 以**白底贴图**参与烘焙，把算好的 Alpha 带出来 |
+| 分界位置 | 关键点放在 `1 − border`（**镜像了**） | 在 `x = saturate(dotNL × 0.5 + 0.5)` 空间里，过渡窗口是 `[border − blur/2, border + blur/2]` |
+| 软硬 | **完全没用 `_ShadowBlur`** | 过渡宽度由 blur 决定 |
+| 第三层阴影 | `_Shadow3rdColor` 的 alpha = 0（作者没启用）也被当成黑色关键点 | `lerp(indirect, third, a3 × (1 − s3))`，a3 = 0 时不生效 |
+| 阴影强度 | alpha 被忽略 | 每层阴影色的 **alpha 就是强度** |
 
-实测：
+两个后果叠在一起：分界线跑到了「接近受光」的位置，过渡段又只有 `blur` 那么窄（例如 0.117），
+而 NonToon 采样的是低分辨率渐变贴图 —— 于是就出现了**硬边 + 阶梯**。
 
-```
-smooth white  planet_nontoon_Base.png   alpha 均值 = 0.6706   ← saturate(1×1 + (−0.33)) = 0.67 ✓
-smooth white  ring_nontoon_Base.png     alpha 均值 = 0.6764（遮罩逐像素 × 0.73，黑区 alpha=0 与 lilToon 一致）✓
-```
+## 现在
 
-遮罩贴图读不出来（没勾 Read/Write）时会**警告**并按默认白遮罩（= 1）计算，而不是整段丢掉。
+按 lilToon 的公式（`lil_common_frag.hlsl` 的 `lilTooningScale` + 阴影色叠加顺序），在同一个 `x` 空间里
+**采样 24 个关键点**烘成 Shade 渐变：
 
-## 二、修复：描边粗细和 lilToon 不一致
+- 过渡窗口 `[border ± blur/2]`（和 lilToon 一模一样）；
+- 每层阴影色的 **alpha 当强度**；
+- `alpha ≈ 0` 的层直接跳过（不再把「没启用的第三层」当成黑色用）；
+- 受光端回到白色（受光处的 `albedo × 光` 由 NonToon 自己算）。
 
-两个 shader 的描边偏移**不在同一个空间**：
-
-```
-lilToon ：positionOS += outlineN * (_OutlineWidth * 0.01 * 宽度贴图)   → 过物体矩阵，会被对象缩放缩放
-NonToon ：vertex.position（已是世界空间）+= outlineN * _OutlineWidth * 0.01 → 不受对象缩放影响
-```
-
-所以对象一旦被缩放，NonToon 的描边就会等比例偏粗/偏细。现在转换时按「使用该材质的渲染器」的**世界缩放**折算 `_OutlineWidth`（缩放 ≈ 1 时等于不改），同一材质被不同缩放共用时会警告并取平均，日志里会写明：
+转换日志会写明实际用的层数与窗口：
 
 ```
-· 描边宽度  ->  0.07 → 0.021（对象缩放 0.3 × 手动倍数 1）
+· 阴影色 2 层（border 0.117 / blur 0.189，按 lilToon 的过渡窗口采样）  ->  _SharedGradients（Shade 渐变）
 ```
-
-## 三、新增：描边宽度倍数（手动系数）
-
-- 菜单 `Tools > LilToNonToon Switcher > 描边宽度倍数 >` → `0.25 / 0.5 / 0.75 / 1（默认） / 1.5`
-- 设置窗口「高级设置」→ 滑条 0–2
-- 最终公式：`描边宽度 = 原值 × 对象世界缩放 × 这个倍数`（改完重新转换后生效）
-
-## 四、已知限制
-
-lilToon 的 `_OutlineFixWidth` 会在**相机距离小于 1 米**时把描边按 `× saturate(距离)` 收窄（贴脸看最多细 20~30%）；NonToon 的描边没有随距离变化的机制，所以**极度贴近看**时 NonToon 仍会略粗一点。正常距离两者一致；需要的话用「描边宽度倍数」按材质补。
 
 ## 升级后
 
-1. ALCOM 更新到 1.1.4；
-2. 把轻纱 / 薄片 / 描边相关的材质**重新转换一次**（会覆盖同名的 `_nontoon.mat`，原 lilToon 材质不动）。
+1. ALCOM 更新到 1.1.5；
+2. **重新转换**脸部（以及任何用 lilToon 阴影色的）材质 —— 渐变是烘焙出来的资产，不重转不会变。
 
 ## 安装 / 升级
 

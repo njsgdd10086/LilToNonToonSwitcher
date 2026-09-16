@@ -2,6 +2,31 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.5] - 2026-09-17
+
+### 修复
+
+- **脸上出现硬边、还带阶梯的明暗分界**（脸颊一块灰蓝、分界线像台阶）。原因是烘 LilToon 阴影色时
+  渐变的关键点位置和软硬都不对：
+
+  | | 旧做法 | lilToon 的真实行为 | 现在 |
+  | --- | --- | --- | --- |
+  | 分界位置 | 关键点放在 `1 − border`（**镜像了**） | 在 `x = saturate(dotNL × 0.5 + 0.5)` 空间里，过渡窗口是 `[border − blur/2, border + blur/2]` | 按窗口逐点采样 |
+  | 软硬 | **完全没用 `_ShadowBlur`** | 由 blur 决定过渡宽度 | 用 blur 算窗口宽度 |
+  | 第三层阴影 | `_Shadow3rdColor` 的 alpha = 0（作者没启用）也被当成黑色关键点 | `lerp(indirect, third, a3 × (1 − s3))`，a3 = 0 时不生效 | alpha ≈ 0 的层直接跳过 |
+  | 阴影强度 | alpha 被忽略 | 每层阴影色的 **alpha 就是强度** | 按强度做 lerp |
+
+  现在按 lilToon 的公式（`lil_common_frag.hlsl` 的 `lilTooningScale` + 阴影色叠加顺序）
+  在同一个 `x` 空间里**采样 24 个关键点**烘成 Shade 渐变：过渡窗口 `[border ± blur/2]`、
+  alpha 当强度、a3 = 0 的层跳过、受光端回到白色（受光处的 albedo × 光由 NonToon 自己算）。
+
+  转换日志会写明实际用的层数与窗口，例如：
+  ```
+  · 阴影色 2 层（border 0.117 / blur 0.189，按 lilToon 的过渡窗口采样）  ->  _SharedGradients（Shade 渐变）
+  ```
+
+  注意：**这个修复要重新转换材质才会生效**（渐变是烘焙出来的资产）。
+
 ## [1.1.4] - 2026-09-17
 
 ### 修复

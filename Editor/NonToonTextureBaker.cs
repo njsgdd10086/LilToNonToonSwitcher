@@ -485,6 +485,19 @@ namespace NonToonSwitcher
             return asset;
         }
 
+        /// <summary>
+        /// lilToon 的阴影在 "x = dot(N,L)*0.5+0.5" 空间里做，每层阴影的过渡窗口是
+        /// `[border − blur/2, border + blur/2]`（`lilTooningScale`），阴影色按 alpha 强度叠加：
+        ///
+        ///     indirect = _ShadowColor.rgb;                                    // 主阴影（不含 alpha）
+        ///     indirect = lerp(indirect, _Shadow2ndColor.rgb, a2 * (1 - s2));  // alpha = 强度
+        ///     indirect = lerp(indirect, _Shadow3rdColor.rgb, a3 * (1 - s3));  // a3 = 0 时无影响
+        ///
+        /// NonToon 的 Shade 模块正好也是用同一个 x 采样渐变（`shade ≈ saturate(NdotL)`），
+        /// 所以这里**按 lilToon 的公式逐点采样**烘成渐变：位置和软硬都跟 lilToon 一致。
+        /// 老版本把关键点放在 `1 - border` 上（等于镜像）而且完全没用 blur —— 结果是分界线跑到
+        /// 接近受光的位置、还是硬边 + 渐变贴图的阶梯。
+        /// </summary>
         private static Gradient BuildShadeGradient(Material material, ConversionLog log)
         {
             var first = ShaderUtility.HasProperty(material, "_ShadowColor") ? material.GetColor("_ShadowColor") : Color.white;
@@ -495,32 +508,59 @@ namespace NonToonSwitcher
                 ? material.GetColor("_Shadow3rdColor")
                 : Color.black;
 
-            // lilToon: colour 1 is used inside the shadow, colour 2 / 3 deepen it further.
-            if (second == Color.clear) second = first;
-            if (third == Color.clear) third = second;
-
             var border1 = ShaderUtility.HasProperty(material, "_ShadowBorder") ? material.GetFloat("_ShadowBorder") : 0.5f;
+            var blur1 = ShaderUtility.HasProperty(material, "_ShadowBlur") ? material.GetFloat("_ShadowBlur") : 0.1f;
             var border2 = ShaderUtility.HasProperty(material, "_Shadow2ndBorder") ? material.GetFloat("_Shadow2ndBorder") : 0.15f;
+            var blur2 = ShaderUtility.HasProperty(material, "_Shadow2ndBlur") ? material.GetFloat("_Shadow2ndBlur") : 0.1f;
             var border3 = ShaderUtility.HasProperty(material, "_Shadow3rdBorder") ? material.GetFloat("_Shadow3rdBorder") : 0.25f;
+            var blur3 = ShaderUtility.HasProperty(material, "_Shadow3rdBlur") ? material.GetFloat("_Shadow3rdBlur") : 0.1f;
 
-            // NonToon samples the ramp with a 0..1 shade factor; 0 is fully shaded, 1 is lit.
+            // alpha 是"这层阴影的强度"，0 表示作者没在用这一层（lilToon 里 lerp 权重就是 a * (1 - s)）
+            first.a = 1f;
+            var use2 = second.a > 0.001f;
+            var use3 = third.a > 0.001f;
+            var secondRgb = new Color(second.r, second.g, second.b, 1f);
+            var thirdRgb = new Color(third.r, third.g, third.b, 1f);
+
+            const int samples = 24;
+            var colorKeys = new GradientColorKey[samples];
+            for (var i = 0; i < samples; i++)
+            {
+                var x = i / (float)(samples - 1);
+                var s1 = TooningWindow(x, border1, blur1);
+                var s2 = TooningWindow(x, border2, blur2);
+                var s3 = TooningWindow(x, border3, blur3);
+
+                // lilToon: indirectCol = ShadowColor → 再按 a*(1-s) 叠上 2nd / 3rd
+                var rgb = new Color(first.r, first.g, first.b, 1f);
+                if (use2) rgb = Color.Lerp(rgb, secondRgb, Mathf.Clamp01(second.a * (1f - s2)));
+                if (use3) rgb = Color.Lerp(rgb, thirdRgb, Mathf.Clamp01(third.a * (1f - s3)));
+
+                // 受光处是 albedo × 光（NonToon 自己会乘），所以渐变在受光端回到白色
+                rgb = Color.Lerp(rgb, Color.white, s1);
+                colorKeys[i] = new GradientColorKey(rgb, x);
+            }
+
             var gradient = new Gradient();
-            gradient.SetKeys(
-                new[]
-                {
-                    new GradientColorKey(third, 0f),
-                    new GradientColorKey(second, Mathf.Clamp01(1f - border2) * 0.5f),
-                    new GradientColorKey(first, Mathf.Clamp01(1f - border1)),
-                    new GradientColorKey(Color.white, 1f),
-                },
-                new[]
-                {
-                    new GradientAlphaKey(third.a, 0f),
-                    new GradientAlphaKey(second.a, Mathf.Clamp01(1f - border2) * 0.5f),
-                    new GradientAlphaKey(first.a, Mathf.Clamp01(1f - border1)),
-                    new GradientAlphaKey(1f, 1f),
-                });
+            gradient.SetKeys(colorKeys, new[]
+            {
+                new GradientAlphaKey(1f, 0f),
+                new GradientAlphaKey(1f, 1f),
+            });
+
+            var layers = use3 ? "3 层" : use2 ? "2 层" : "1 层";
+            log.Mapped("阴影色 " + layers + "（border " + border1.ToString("0.###") + " / blur " + blur1.ToString("0.###") +
+                       "，按 lilToon 的过渡窗口采样）", "_SharedGradients（Shade 渐变）");
             return gradient;
+        }
+
+        /// <summary>lilToon 的 <c>lilTooningNoSaturateScale(value, border, blur)</c>：过渡窗口 [border ± blur/2]。</summary>
+        private static float TooningWindow(float value, float border, float blur)
+        {
+            var min = Mathf.Clamp01(border - blur * 0.5f);
+            var max = Mathf.Clamp01(border + blur * 0.5f);
+            var span = Mathf.Max(max - min, 0.0001f);
+            return Mathf.Clamp01((value - min) / span);
         }
 
         private static Gradient BuildRimShadeGradient(Material material)
