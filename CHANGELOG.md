@@ -2,6 +2,37 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.6] - 2026-09-17
+
+### 修复
+
+- **1.1.5 的阴影渐变修复其实没生效**：写 `.scgradients` 资产的代码在最后一步把 Gradient
+  **又压回了 4 个等距点** ——
+
+  ```csharp
+  key0 = gradient.Evaluate(0f);        // 不管 Gradient 里有多少关键点
+  key1 = gradient.Evaluate(1f / 3f);   // 都只在这四个位置取值写出去
+  key2 = gradient.Evaluate(2f / 3f);
+  key3 = gradient.Evaluate(1f);
+  ```
+
+  而阴影过渡窗口（例如宽 0.189）在 0~1 里只占很小一段，4 个等距点几乎全落在窗口外 →
+  写出来的渐变是错的（实测你工程里那份干脆是**全白**，等于 NonToon 完全没有阴影压暗）。
+
+  现在：**把 Gradient 的真实关键点原样写出去**（最多 8 个，Unity 的上限）。
+
+- **关键点改用「过渡窗口边界」而不是密集采样**：lilToon 的阴影在窗口内是**分段线性**的，
+  所以取 `0 / 1` 加上每层阴影的 `border ± blur/2`（最多 8 个）就与 lilToon **完全等价**，
+  比密集采样更准也更省。
+
+- **补上 `_ShadowStrength`**：lilToon 里它是
+  `lns.x = lerp(1.0, lns.x, _ShadowStrength)` —— 把受光系数往 1 拉，也就是"阴影只有几成"。
+  之前完全没用，阴影会偏重（例如某张脸的强度是 **0.2**，阴影本应很淡）。
+  现在按同样的比例收着。
+
+- 源材质用「阴影色贴图 / LUT」模式（`_ShadowColorType != 0`）时会给出警告：
+  NonToon 只能按单一阴影色近似。
+
 ## [1.1.5] - 2026-09-17
 
 ### 修复

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -514,6 +515,12 @@ namespace NonToonSwitcher
             var blur2 = ShaderUtility.HasProperty(material, "_Shadow2ndBlur") ? material.GetFloat("_Shadow2ndBlur") : 0.1f;
             var border3 = ShaderUtility.HasProperty(material, "_Shadow3rdBorder") ? material.GetFloat("_Shadow3rdBorder") : 0.25f;
             var blur3 = ShaderUtility.HasProperty(material, "_Shadow3rdBlur") ? material.GetFloat("_Shadow3rdBlur") : 0.1f;
+            // lilToon: `lns.x = lerp(1.0, lns.x, _ShadowStrength)` —— 强度是把受光系数往 1 拉，
+            // 所以 0.2 表示"阴影只有两成"，我们的渐变也必须按这个比例收着（否则阴影会过重）。
+            var strength = ShaderUtility.HasProperty(material, "_ShadowStrength") ? material.GetFloat("_ShadowStrength") : 1f;
+            strength = Mathf.Clamp01(strength);
+            if (ShaderUtility.HasProperty(material, "_ShadowColorType") && material.GetFloat("_ShadowColorType") != 0f)
+                log.Warn("源材质的阴影是「阴影色贴图 / LUT」模式，NonToon 只能按单一阴影色近似，脸上阴影可能不完全一致。");
 
             // alpha 是"这层阴影的强度"，0 表示作者没在用这一层（lilToon 里 lerp 权重就是 a * (1 - s)）
             first.a = 1f;
@@ -522,11 +529,21 @@ namespace NonToonSwitcher
             var secondRgb = new Color(second.r, second.g, second.b, 1f);
             var thirdRgb = new Color(third.r, third.g, third.b, 1f);
 
-            const int samples = 24;
-            var colorKeys = new GradientColorKey[samples];
-            for (var i = 0; i < samples; i++)
+            // lilToon 的阴影在窗口内是**分段线性**的，所以只要把"窗口边界"当关键点就完全等价。
+            // （Unity 的 Gradient 最多 8 个颜色关键点：0 / 1 + 每层 2 个边界 = 最多 8 个，正好够）
+            var stops = new List<float> { 0f, 1f };
+            AddWindowStops(stops, border1, blur1);
+            if (use2) AddWindowStops(stops, border2, blur2);
+            if (use3) AddWindowStops(stops, border3, blur3);
+            stops.Sort();
+
+            var colorKeys = new List<GradientColorKey>();
+            var last = float.NaN;
+            foreach (var x in stops)
             {
-                var x = i / (float)(samples - 1);
+                if (!float.IsNaN(last) && Mathf.Abs(x - last) < 0.0005f) continue;
+                last = x;
+
                 var s1 = TooningWindow(x, border1, blur1);
                 var s2 = TooningWindow(x, border2, blur2);
                 var s3 = TooningWindow(x, border3, blur3);
@@ -536,13 +553,15 @@ namespace NonToonSwitcher
                 if (use2) rgb = Color.Lerp(rgb, secondRgb, Mathf.Clamp01(second.a * (1f - s2)));
                 if (use3) rgb = Color.Lerp(rgb, thirdRgb, Mathf.Clamp01(third.a * (1f - s3)));
 
-                // 受光处是 albedo × 光（NonToon 自己会乘），所以渐变在受光端回到白色
-                rgb = Color.Lerp(rgb, Color.white, s1);
-                colorKeys[i] = new GradientColorKey(rgb, x);
+                // 受光处是 albedo × 光（NonToon 自己会乘），所以渐变在受光端回到白色；
+                // 混合系数还要过 _ShadowStrength（lilToon 的 lerp(1, s, strength)）
+                var mix = Mathf.Lerp(1f, s1, strength);
+                rgb = Color.Lerp(rgb, Color.white, mix);
+                colorKeys.Add(new GradientColorKey(rgb, x));
             }
 
             var gradient = new Gradient();
-            gradient.SetKeys(colorKeys, new[]
+            gradient.SetKeys(colorKeys.ToArray(), new[]
             {
                 new GradientAlphaKey(1f, 0f),
                 new GradientAlphaKey(1f, 1f),
@@ -550,8 +569,15 @@ namespace NonToonSwitcher
 
             var layers = use3 ? "3 层" : use2 ? "2 层" : "1 层";
             log.Mapped("阴影色 " + layers + "（border " + border1.ToString("0.###") + " / blur " + blur1.ToString("0.###") +
-                       "，按 lilToon 的过渡窗口采样）", "_SharedGradients（Shade 渐变）");
+                       "，按 lilToon 的过渡窗口取关键点）", "_SharedGradients（Shade 渐变）");
             return gradient;
+        }
+
+        /// <summary>把某一层阴影的过渡窗口边界加进关键点列表（lilToon 的窗口是 [border ± blur/2]）。</summary>
+        private static void AddWindowStops(List<float> stops, float border, float blur)
+        {
+            stops.Add(Mathf.Clamp01(border - blur * 0.5f));
+            stops.Add(Mathf.Clamp01(border + blur * 0.5f));
         }
 
         /// <summary>lilToon 的 <c>lilTooningNoSaturateScale(value, border, blur)</c>：过渡窗口 [border ± blur/2]。</summary>
@@ -611,36 +637,34 @@ namespace NonToonSwitcher
             return sb.ToString();
         }
 
+        /// <summary>
+        /// 把 Gradient 的**真实关键点**写成 Unity 的 Gradient 序列化形式。
+        /// 以前这里固定在 0 / 1/3 / 2/3 / 1 四个位置 `Evaluate` 后再写 —— 等于把渐变又压回 4 个等距点，
+        /// 阴影过渡窗口（例如宽 0.189）里的信息基本全被丢掉，写出来的渐变是错的。
+        /// Unity 的 Gradient 最多 8 个颜色关键点，这里最多写到 8 个。
+        /// </summary>
         private static void WriteGradient(StringBuilder sb, Gradient gradient)
         {
+            var keys = gradient.colorKeys;
+            if (keys == null || keys.Length == 0) keys = new[] { new GradientColorKey(Color.white, 0f) };
+            if (keys.Length > 8) keys = keys.Take(8).ToArray();
+
             sb.AppendLine("  - serializedVersion: 2");
-            sb.AppendLine("    key0: " + ColorLine(gradient.Evaluate(0f)));
-            sb.AppendLine("    key1: " + ColorLine(gradient.Evaluate(1f / 3f)));
-            sb.AppendLine("    key2: " + ColorLine(gradient.Evaluate(2f / 3f)));
-            sb.AppendLine("    key3: " + ColorLine(gradient.Evaluate(1f)));
-            sb.AppendLine("    key4: " + ColorLine(Color.black));
-            sb.AppendLine("    key5: " + ColorLine(Color.black));
-            sb.AppendLine("    key6: " + ColorLine(Color.black));
-            sb.AppendLine("    key7: " + ColorLine(Color.black));
-            sb.AppendLine("    ctime0: 0");
-            sb.AppendLine("    ctime1: 21845");
-            sb.AppendLine("    ctime2: 43690");
-            sb.AppendLine("    ctime3: 65535");
-            sb.AppendLine("    ctime4: 0");
-            sb.AppendLine("    ctime5: 0");
-            sb.AppendLine("    ctime6: 0");
-            sb.AppendLine("    ctime7: 0");
+            for (var i = 0; i < 8; i++)
+            {
+                var color = i < keys.Length ? keys[i].color : Color.black;
+                sb.AppendLine("    key" + i + ": " + ColorLine(color));
+            }
+            for (var i = 0; i < 8; i++)
+                sb.AppendLine("    ctime" + i + ": " + (i < keys.Length
+                    ? Mathf.RoundToInt(Mathf.Clamp01(keys[i].time) * 65535f).ToString(CultureInfo.InvariantCulture)
+                    : "0"));
             sb.AppendLine("    atime0: 0");
             sb.AppendLine("    atime1: 65535");
-            sb.AppendLine("    atime2: 0");
-            sb.AppendLine("    atime3: 0");
-            sb.AppendLine("    atime4: 0");
-            sb.AppendLine("    atime5: 0");
-            sb.AppendLine("    atime6: 0");
-            sb.AppendLine("    atime7: 0");
+            for (var i = 2; i < 8; i++) sb.AppendLine("    atime" + i + ": 0");
             sb.AppendLine("    m_Mode: 0");
             sb.AppendLine("    m_ColorSpace: -1");
-            sb.AppendLine("    m_NumColorKeys: 4");
+            sb.AppendLine("    m_NumColorKeys: " + keys.Length);
             sb.AppendLine("    m_NumAlphaKeys: 2");
         }
 
