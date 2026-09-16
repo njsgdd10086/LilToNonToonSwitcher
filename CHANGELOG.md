@@ -2,6 +2,32 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.7] - 2026-09-17
+
+### 修复
+
+- **半透明腮红 / 薄纱转完变成又厚又实的一块，边界一刀切**（例如开"害羞脸红"表情时脸上出现硬边色块）。
+  原因是两个 shader 对透明度的处理方式不同：
+
+  | | lilToon | NonToon |
+  | --- | --- | --- |
+  | 片元 | **预乘 alpha**：`rgb *= alpha` | 不预乘 |
+  | 混合 | `Blend One OneMinusSrcAlpha`（`_SrcBlend = 1`） | 照搬同一组系数 |
+
+  照搬 `One / OneMinusSrcAlpha` 时，NonToon 会把颜色**按原样叠上去**（等于半透明层变成实心块）。
+  数学上 lilToon 出的是 `rgb·a + dst·(1−a)`，把源系数换成 `SrcAlpha(5)` 之后 NonToon 出的**完全一样** ——
+  所以转换时现在会自动做这个等价换算（写进日志）：
+
+  ```
+  · 渲染状态（沿用原材质）  ->  Cull=2、SrcBlend=5、DstBlend=10、…、_SrcBlend=5（lilToon 预乘 alpha → NonToon 用 SrcAlpha 等价换算）
+  ```
+
+  只在「源系数 = `One` **且** 目标系数 ≠ `Zero`」时换算；不透明的 `One / Zero` 保持原样
+  （否则会把 alpha 也乘进去，不透明材质会变暗）。
+
+  影响面很广：lilToon 的透明材质基本都是这套系数（示例工程里 17 个，包括脸上的特效层、
+  头发、以及各种 ring / planet 配件），**重新转换后**都会变对。
+
 ## [1.1.6] - 2026-09-17
 
 ### 修复

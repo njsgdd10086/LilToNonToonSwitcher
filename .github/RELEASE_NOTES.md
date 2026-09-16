@@ -1,49 +1,35 @@
-**LilToNonToon Switcher 1.1.6** —— 修掉「1.1.5 的阴影渐变修复其实没生效」，脸上阴影现在才真的按 lilToon 的公式烘。
+**LilToNonToon Switcher 1.1.7** —— 修掉「半透明层转完变成又厚又实的一块」（开"害羞脸红"表情时脸上的硬边色块就是这个）。
 
-## 一、为什么 1.1.5 没起作用
+## 原因：两个 shader 对透明度的处理方式不同
 
-写 `.scgradients` 资产的那一步，在最后把 Gradient **又压回了 4 个等距点**：
+| | lilToon | NonToon |
+| --- | --- | --- |
+| 片元 | **预乘 alpha**：`rgb *= alpha` | 不预乘 |
+| 混合 | `Blend One OneMinusSrcAlpha`（`_SrcBlend = 1`） | 照搬同一组系数 |
 
-```csharp
-key0 = gradient.Evaluate(0f);        // 不管 Gradient 里有多少关键点
-key1 = gradient.Evaluate(1f / 3f);   // 都只在这四个位置取值写出去
-key2 = gradient.Evaluate(2f / 3f);
-key3 = gradient.Evaluate(1f);
-```
+照搬 `One / OneMinusSrcAlpha` 时，NonToon 会把颜色**按原样叠上去** ——
+半透明的腮红层就变成了一块实心色块，边界一刀切（你截图里那条硬边就是这么来的）。
 
-阴影过渡窗口（例如宽 **0.189**）在 0~1 里只占一小段，4 个等距点几乎全落在窗口外 ——
-于是写出来的渐变是错的。实测你工程里那份**整条都是白色**，等于 NonToon 上完全没有阴影压暗。
-
-现在**把 Gradient 的真实关键点原样写出去**（Unity 的 Gradient 最多 8 个关键点）。
-
-## 二、关键点改用「过渡窗口边界」
-
-lilToon 的阴影在窗口内是**分段线性**的，所以取 `0 / 1` 加上每层阴影的 `border ± blur/2`
-（1 层 4 个、2 层 6 个、3 层 8 个）就与 lilToon **完全等价** —— 比密集采样更准。
-
-以某张脸（border 0.117 / blur 0.189 / 第二层 0.214 / 0.073）为例，修复后写出的关键点是：
+数学上 lilToon 输出的是 `rgb·a + dst·(1−a)`；把源系数换成 `SrcAlpha(5)` 之后，
+NonToon 输出的**完全一样**。所以转换时现在会自动做这个等价换算，并写进日志：
 
 ```
-x=0.0000  rgb=(0.991, 0.908, 0.888)   ← 最深（第二层阴影色，不再是黑）
-x=0.0225  rgb=(0.991, 0.908, 0.888)
-x=0.1775  rgb=(0.998, 0.984, 0.980)
-x=0.2115  rgb=(1.000, 1.000, 1.000)   ← 过渡窗口 [0.023, 0.212]，与 lilToon 一致
-x=1.0000  rgb=(1.000, 1.000, 1.000)
+· 渲染状态（沿用原材质）  ->  Cull=2、SrcBlend=5、DstBlend=10、…（lilToon 预乘 alpha → NonToon 用 SrcAlpha 等价换算）
 ```
 
-## 三、补上 `_ShadowStrength`
+只在「源系数 = `One` **且** 目标系数 ≠ `Zero`」时换算；不透明的 `One / Zero` 保持原样
+（否则会把 alpha 也乘进去，不透明材质会变暗）。
 
-lilToon 里它是 `lns.x = lerp(1.0, lns.x, _ShadowStrength)` —— 把受光系数往 1 拉，
-也就是「阴影只有几成」。之前完全没用上，阴影会偏重；现在按同样比例收着
-（例如强度 0.2 的脸，阴影就只有两成，很淡）。
+## 影响面
 
-## 四、其它
-
-- 源材质用「阴影色贴图 / LUT」模式（`_ShadowColorType != 0`）时会给出警告：NonToon 只能按单一阴影色近似。
+lilToon 的透明材质基本都是这套系数 —— 示例工程里就有 **17 个**：
+脸上的特效层（腮红）、`Chocolat_Hair`、所有 `smooth white / black ring / planet`、
+`Costume`、`Face_transparent` 等等。**重新转换后**全部生效。
 
 ## 升级后
 
-**重新转换**材质才会生效（渐变是烘焙资产）。ALCOM 更新到 1.1.6 → 重转脸部等材质。
+ALCOM 更新到 1.1.7 → **重新转换**透明类材质（脸、头发、配件等）。
+不透明材质（`One / Zero`）不受影响，转不转都一样。
 
 ## 安装 / 升级
 

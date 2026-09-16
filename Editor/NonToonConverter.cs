@@ -552,7 +552,40 @@ namespace NonToonSwitcher
                 if (!ShaderUtility.CopyProperty(source, target, name)) continue;
                 parts.Add(name.Substring(1) + "=" + ReadSourceInt(source, name));
             }
+
+            var blendNote = FixPremultipliedBlend(target);
+            if (blendNote != null) parts.Add(blendNote);
+
             return parts.Count > 0 ? string.Join("、", parts.ToArray()) : "无可沿用项";
+        }
+
+        /// <summary>
+        /// lilToon 的透明是**预乘 alpha**：片元里先做 `rgb *= alpha`，混合写的是
+        /// `Blend One OneMinusSrcAlpha`（`_SrcBlend = 1`）。NonToon 不做预乘，照搬 One 会把颜色
+        /// **按原样叠上去** —— 半透明的腮红 / 薄纱会变成又厚又实的一块（边界一刀切）。
+        ///
+        /// 数学上 lilToon 出的是 `rgb·a + dst·(1−a)`；把源系数换成 `SrcAlpha(5)` 后 NonToon 出的
+        /// 完全一样，所以这里做等价换算。只在"源系数 = One **且** 目标系数 ≠ Zero"时换算：
+        /// 不透明的 `One / Zero` 必须保持原样，否则会把 alpha 也乘进去。
+        /// </summary>
+        private static string FixPremultipliedBlend(Material target)
+        {
+            var fixedNames = new List<string>();
+            if (TryTranslate(target, "_SrcBlend", "_DstBlend")) fixedNames.Add("_SrcBlend");
+            if (TryTranslate(target, "_SrcBlendAlpha", "_DstBlendAlpha")) fixedNames.Add("_SrcBlendAlpha");
+            if (fixedNames.Count == 0) return null;
+            return string.Join("/", fixedNames.ToArray()) + "=5（lilToon 预乘 alpha → NonToon 用 SrcAlpha 等价换算）";
+        }
+
+        private static bool TryTranslate(Material target, string srcName, string dstName)
+        {
+            if (!ShaderUtility.HasProperty(target, srcName)) return false;
+            if (!ShaderUtility.HasProperty(target, dstName)) return false;
+            var src = ShaderUtility.ReadSerializedInt(target, srcName, (int)BlendMode.One);
+            var dst = ShaderUtility.ReadSerializedInt(target, dstName, (int)BlendMode.Zero);
+            if (src != (int)BlendMode.One || dst == (int)BlendMode.Zero) return false;
+            ShaderUtility.SetIntValue(target, srcName, (int)BlendMode.SrcAlpha);
+            return true;
         }
 
         /// <summary>
