@@ -25,6 +25,11 @@ namespace NonToonSwitcher
         [SerializeField] private bool bakeSharedMask = true;
         [SerializeField] private bool bakeGradients = true;
         [SerializeField] private bool logToConsole = true;
+        [SerializeField] private float outlineZOffsetFactor = DefaultOutlineZOffsetFactor;
+        [SerializeField] private ReplaceMode replaceMode = ReplaceMode.Switch;
+
+        /// <summary>lilToon 描边宽度贴图的补偿：描边整体后移 = 描边宽度 × 0.01 × 这个倍数。</summary>
+        public const float DefaultOutlineZOffsetFactor = 1f;
 
         public string OutputFolder
         {
@@ -98,6 +103,29 @@ namespace NonToonSwitcher
         {
             get { return logToConsole; }
             set { logToConsole = value; SaveSettings(); }
+        }
+
+        /// <summary>
+        /// 转换后的材质怎么落到模型上：
+        /// <see cref="ReplaceMode.Switch"/> 保留 lilToon 材质并建切换开关（默认）；
+        /// <see cref="ReplaceMode.ReplaceInPlace"/> 原地直接替换成 NonToon；
+        /// <see cref="ReplaceMode.DuplicateThenReplace"/> 复制一份 &lt;名字&gt;_nontoon，换在副本上，原对象取消勾选。
+        /// </summary>
+        public ReplaceMode ReplaceMode
+        {
+            get { return replaceMode; }
+            set { replaceMode = value; SaveSettings(); }
+        }
+
+        /// <summary>
+        /// lilToon 的描边宽度贴图（`_OutlineWidthMask`）NonToon 没有对应功能，
+        /// 转换时会把描边整体往后推 `描边宽度 × 0.01 × 这个倍数`，避免描边壳在嘴/眼附近画到脸上。
+        /// 1 = 与描边自身宽度同量级（默认）；0 = 不做处理；觉得描边太淡可以调小。
+        /// </summary>
+        public float OutlineZOffsetFactor
+        {
+            get { return Mathf.Clamp(outlineZOffsetFactor, 0f, 10f); }
+            set { outlineZOffsetFactor = Mathf.Clamp(value, 0f, 10f); SaveSettings(); }
         }
 
         private void SaveSettings()

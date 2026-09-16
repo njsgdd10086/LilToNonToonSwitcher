@@ -9,6 +9,17 @@ using UnityEngine.Rendering;
 
 namespace NonToonSwitcher
 {
+    /// <summary>How the converted materials end up on the model.</summary>
+    public enum ReplaceMode
+    {
+        /// <summary>Keep the lilToon materials and add a menu switch (default).</summary>
+        Switch = 0,
+        /// <summary>Replace the materials on the selected objects in place (no switch, no copy).</summary>
+        ReplaceInPlace = 1,
+        /// <summary>Duplicate the selected objects as &lt;名字&gt;_nontoon, convert the copy and disable the original.</summary>
+        DuplicateThenReplace = 2,
+    }
+
     public sealed class ConvertRequest
     {
         public GameObject[] Targets;
@@ -29,6 +40,8 @@ namespace NonToonSwitcher
         /// the toggle point at the material that is already assigned.
         /// </summary>
         public bool ReplaceMaterialsOnRenderers;
+        /// <summary>切换开关 / 原地直接替换 / 复制一份 <名字>_nontoon 再替换。</summary>
+        public ReplaceMode ReplaceMode = ReplaceMode.Switch;
         /// <summary>Also convert materials that are only referenced by animation clips.</summary>
         public bool CollectAnimatorMaterials = true;
         /// <summary>
@@ -118,6 +131,9 @@ namespace NonToonSwitcher
         /// <summary>切换对象的固定名字，用于在同一个 avatar 下复用。</summary>
         public const string SwitcherObjectName = "_NonToonSwitch";
 
+        /// <summary>「复制一份再换」时副本对象的名字后缀：<原对象名>_nontoon。</summary>
+        public const string DuplicateSuffix = "_nontoon";
+
         /// <summary>
         /// File name of the converted material: "&lt;original name&gt;_nontoon.mat".
         /// An existing suffix is not duplicated.
@@ -173,6 +189,7 @@ namespace NonToonSwitcher
             ApplyMappings(source, target, log);
             ApplyRenderingMode(source, target, log);
             ApplyVertexColorFlags(source, target, log);
+            ApplyOutlineWidthMaskWorkaround(source, target, log);
 
             // Integer properties do not survive a plain SetInt on Shader Core shaders, so they are written
             // through the serialized property list once the material exists as an asset.
@@ -590,6 +607,46 @@ namespace NonToonSwitcher
             }
         }
 
+        /// <summary>
+        /// lilToon 的描边宽度贴图（`_OutlineWidthMask`）在 NonToon 里没有对应功能，而两者差别很大：
+        /// 作者常用它把嘴唇、眼睛这些地方的描边宽度压成 0（描边壳不该出现在五官上），
+        /// 但 NonToon 的描边是**均匀**的反向外扩壳，于是嘴腔内壁的外扩壳会照样画出来，
+        /// 而且它采样的是该处 UV 的贴图颜色 —— 看上去就像脸在嘴部被"撕破"。
+        ///
+        /// 处理办法：把描边整体沿视线方向后移一个自身宽度（`_OutlineZOffset`，NonToon 的
+        /// outline 顶点代码是 `pos += N * _OutlineWidth * 0.01 - V * _OutlineZOffset`，
+        /// 正值就是往后推）。这样描边壳在跟脸面自身重叠的地方会被深度测试剔除，
+        /// 剪影处的描边依旧保留。
+        /// </summary>
+        private static void ApplyOutlineWidthMaskWorkaround(Material source, Material target, ConversionLog log)
+        {
+            if (target == null) return;
+            if (!ShaderUtility.HasProperty(target, "_OutlineZOffset")) return;
+            if (!ShaderUtility.HasProperty(source, "_OutlineWidthMask")) return;
+            if (source.GetTexture("_OutlineWidthMask") == null) return;
+            if (!ShaderUtility.HasProperty(target, "_OutlineWidth")) return;
+
+            var width = target.GetFloat("_OutlineWidth");
+            if (width <= 0f) return;
+
+            // 后移倍数是项目设置（默认 1 = 与描边自身宽度同量级），0 表示不做处理。
+            var factor = NonToonSwitcherSettings.instance.OutlineZOffsetFactor;
+            var offset = width * 0.01f * factor;
+            if (offset <= 0f)
+            {
+                log.Mapped("描边宽度贴图（NonToon 没有这个功能）", "后移倍数 = 0，未做处理（描边可能盖住嘴唇 / 眼睛）");
+                return;
+            }
+
+            var current = ShaderUtility.HasProperty(target, "_OutlineZOffset") ? target.GetFloat("_OutlineZOffset") : 0f;
+            if (current >= offset) return;
+
+            ShaderUtility.SetFloatValue(target, "_OutlineZOffset", offset);
+            log.Mapped("描边宽度贴图（NonToon 没有这个功能）",
+                "描边整体后移 " + offset.ToString("0.#####") + "（_OutlineZOffset，倍数 " +
+                factor.ToString("0.##") + " × 描边宽度），避免描边盖住嘴唇 / 眼睛");
+        }
+
         private static void ApplyVertexColorFlags(Material source, Material target, ConversionLog log)
         {
             // lilToon 2.x: 1 = 0/1 mask from vertex colour R, 2/3 = width from vertex colour R.
@@ -739,14 +796,49 @@ namespace NonToonSwitcher
             // material and its slot, and that information is gone once the renderers have been swapped.
             var assignments = CaptureAssignments(renderers, converted);
 
+            // 「复制一份再换」：把选中的对象复制成 <名字>_nontoon，材质换在副本上，
+            // 原来那份原样保留（只是取消勾选），随时可以勾回来回退。
+            if (request.ReplaceMode == ReplaceMode.DuplicateThenReplace)
+            {
+                var duplicated = DuplicateAndReplace(request.Targets, assignments, result);
+                if (duplicated)
+                {
+                    result.ReplacedOnRenderers = true;
+                    foreach (var target in request.Targets)
+                    {
+                        if (target != null) EditorUtility.SetDirty(target);
+                    }
+                    EditorSceneManager_Helper.MarkDirty();
+                    AssetDatabase.SaveAssets();
+
+                    if (settings.LogToConsole)
+                    {
+                        var duplicateText = result.BuildText();
+                        if (result.Errors.Count > 0) Debug.LogError(duplicateText);
+                        else if (result.Warnings.Count > 0) Debug.LogWarning(duplicateText);
+                        else Debug.Log(duplicateText);
+                    }
+
+                    return result;
+                }
+
+                // 复制失败就退回"直接替换原对象"，不要什么都不做。
+                result.Warn("复制对象失败，已改为直接替换原对象上的材质。");
+            }
+
             // In Material Setter mode the renderers keep their original materials unless the user asks for
             // the swap, because the toggle is what turns NonToon on.
             var replaceOnRenderers = request.ReplaceMaterialsOnRenderers ||
+                                     request.ReplaceMode != ReplaceMode.Switch ||
                                      (request.ApplyToSelectionImmediately &&
                                       request.SwitcherMode == SwitcherMode.MaterialSwap) ||
                                      !request.CreateSwitcher;
 
-            if (replaceOnRenderers) ApplyMaterials(assignments);
+            if (replaceOnRenderers)
+            {
+                ApplyMaterials(assignments);
+                result.ReplacedOnRenderers = true;
+            }
 
             if (request.CreateSwitcher)
             {
@@ -846,6 +938,153 @@ namespace NonToonSwitcher
                 }
             }
             return assignments;
+        }
+
+        /// <summary>
+        /// 「复制一份再换」：把每个选中对象复制成 <名字>_nontoon，材质换在副本上，
+        /// 原来那份保留原样但取消勾选（Active = false），想回退就把它勾回来。
+        /// 副本里会先删掉我们之前生成的 <see cref="SwitcherObjectName"/>（否则副本里既有 NonToon 材质、
+        /// 又有会切回 lilToon 的开关，互相打架）。
+        /// </summary>
+        private static bool DuplicateAndReplace(GameObject[] targets, List<MaterialAssignment> assignments,
+            ConversionResult result)
+        {
+            if (targets == null || targets.Length == 0) return false;
+
+            var ok = false;
+            foreach (var target in targets)
+            {
+                if (target == null || target.transform == null) continue;
+
+                var duplicate = FindExistingDuplicate(target) ?? DuplicateObject(target, result);
+                if (duplicate == null) continue;
+
+                RemoveGeneratedSwitchers(duplicate);
+                if (!duplicate.activeSelf) duplicate.SetActive(true);
+
+                ApplyMaterials(RemapToDuplicate(assignments, target, duplicate, result));
+
+                Undo.RecordObject(target, "停用原对象（NonToon 副本已生成）");
+                target.SetActive(false);
+                EditorUtility.SetDirty(target);
+
+                result.DuplicatedObjects.Add(duplicate.name + "（原对象 " + target.name + " 已取消勾选）");
+                ok = true;
+            }
+
+            return ok;
+        }
+
+        /// <summary>复制对象本体，名字加 <see cref="DuplicateSuffix"/>，并排在原对象后面。</summary>
+        private static GameObject DuplicateObject(GameObject target, ConversionResult result)
+        {
+            var duplicate = UnityEngine.Object.Instantiate(target);
+            duplicate.name = target.name + DuplicateSuffix;
+            duplicate.transform.SetParent(target.transform.parent, false);
+            duplicate.transform.SetSiblingIndex(target.transform.GetSiblingIndex() + 1);
+            Undo.RegisterCreatedObjectUndo(duplicate, "复制为 " + DuplicateSuffix);
+            result.CreatedObjects.Add(duplicate);
+            return duplicate;
+        }
+
+        /// <summary>同一个父对象下已经有一个同名副本时直接复用它（重复转换不会越堆越多）。</summary>
+        private static GameObject FindExistingDuplicate(GameObject target)
+        {
+            var parent = target.transform.parent;
+            var wanted = target.name + DuplicateSuffix;
+            if (parent == null)
+            {
+                foreach (var root in target.scene.GetRootGameObjects())
+                {
+                    if (root != target && root.name == wanted) return root;
+                }
+                return null;
+            }
+
+            for (var i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                if (child != target.transform && child.name == wanted) return child.gameObject;
+            }
+            return null;
+        }
+
+        /// <summary>副本里删掉我们生成的切换开关（连同它下面的 MA 组件一起）。</summary>
+        private static void RemoveGeneratedSwitchers(GameObject duplicate)
+        {
+            var containers = new List<GameObject>();
+            foreach (var transform in duplicate.GetComponentsInChildren<Transform>(true))
+            {
+                if (transform != null && transform.name == SwitcherObjectName) containers.Add(transform.gameObject);
+            }
+            foreach (var container in containers)
+            {
+                if (container == null) continue;
+                Undo.DestroyObjectImmediate(container);
+            }
+        }
+
+        /// <summary>
+        /// 把「原对象上的渲染器槽位」翻译成「副本里对应的渲染器槽位」。
+        /// 副本是 Instantiate 出来的，层级结构一致，所以按相对路径找即可。
+        /// </summary>
+        private static List<MaterialAssignment> RemapToDuplicate(List<MaterialAssignment> assignments,
+            GameObject originalRoot, GameObject duplicateRoot, ConversionResult result)
+        {
+            var remapped = new List<MaterialAssignment>();
+            foreach (var assignment in assignments)
+            {
+                if (assignment.Renderer == null) continue;
+                if (!IsUnder(assignment.Renderer.transform, originalRoot.transform)) continue;
+
+                var relative = RelativePath(originalRoot.transform, assignment.Renderer.transform);
+                var copy = string.IsNullOrEmpty(relative)
+                    ? duplicateRoot.transform
+                    : duplicateRoot.transform.Find(relative);
+                if (copy == null)
+                {
+                    result.Warn("副本里找不到对应的渲染器：" + relative + "（这个槽位没有替换）");
+                    continue;
+                }
+
+                var copyRenderer = copy.GetComponent(assignment.Renderer.GetType()) as Renderer;
+                if (copyRenderer == null)
+                {
+                    result.Warn("副本里的 " + relative + " 没有同类渲染器组件（这个槽位没有替换）");
+                    continue;
+                }
+
+                remapped.Add(new MaterialAssignment
+                {
+                    Renderer = copyRenderer,
+                    Index = assignment.Index,
+                    Original = assignment.Original,
+                    Converted = assignment.Converted,
+                });
+            }
+            return remapped;
+        }
+
+        private static bool IsUnder(Transform transform, Transform root)
+        {
+            for (var current = transform; current != null; current = current.parent)
+            {
+                if (current == root) return true;
+            }
+            return false;
+        }
+
+        /// <summary>相对根对象的层级路径（用于在副本里找同一个渲染器）。</summary>
+        private static string RelativePath(Transform root, Transform target)
+        {
+            if (root == null || target == null || root == target) return string.Empty;
+            var parts = new List<string>();
+            for (var current = target; current != null && current != root; current = current.parent)
+            {
+                parts.Add(current.name);
+            }
+            parts.Reverse();
+            return string.Join("/", parts.ToArray());
         }
 
         /// <summary>Applies the recorded assignments to the renderers.</summary>

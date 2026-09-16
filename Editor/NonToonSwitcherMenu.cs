@@ -99,15 +99,132 @@ namespace NonToonSwitcher
             return true;
         }
 
+        // ------------------------------------------------------------------ 转换方式（三选一）
+        //
+        // 1. 保留 lilToon 材质 + 建切换开关（默认）
+        // 2. 原地直接替换成 NonToon（不回退）
+        // 3. 复制一份 <名字>_nontoon，换在副本上，原对象取消勾选（可回退）
+
+        private const string ModeSwitchPath = "Tools/LilToNonToon Switcher/转换方式/保留原材质 + 建切换开关（默认）";
+        private const string ModeReplacePath = "Tools/LilToNonToon Switcher/转换方式/直接替换成 NonToon（原地替换）";
+        private const string ModeDuplicatePath = "Tools/LilToNonToon Switcher/转换方式/复制一份 _nontoon 后替换（原对象取消勾选）";
+
+        [MenuItem(ModeSwitchPath, false, 150)]
+        private static void UseSwitchMode() { SetReplaceMode(ReplaceMode.Switch); }
+
+        [MenuItem(ModeReplacePath, false, 151)]
+        private static void UseReplaceMode() { SetReplaceMode(ReplaceMode.ReplaceInPlace); }
+
+        [MenuItem(ModeDuplicatePath, false, 152)]
+        private static void UseDuplicateMode() { SetReplaceMode(ReplaceMode.DuplicateThenReplace); }
+
+        private static void SetReplaceMode(ReplaceMode mode)
+        {
+            NonToonSwitcherSettings.instance.ReplaceMode = mode;
+            MarkReplaceMode();
+            switch (mode)
+            {
+                case ReplaceMode.ReplaceInPlace:
+                    Debug.Log("[LilToNonToon] 转换后会把选中对象上的材质原地换成 NonToon，不建切换开关。" +
+                              "（想回退只能靠 Ctrl+Z 或版本管理；建议改用「复制一份 _nontoon 后替换」）");
+                    break;
+                case ReplaceMode.DuplicateThenReplace:
+                    Debug.Log("[LilToNonToon] 转换后会复制一份 " + NonToonConverter.DuplicateSuffix +
+                              "，材质换在副本上，原对象自动取消勾选（想回退就把它勾回来）—— 推荐。");
+                    break;
+                default:
+                    Debug.Log("[LilToNonToon] 转换后保留原来的 lilToon 材质，并新建 " + NonToonConverter.SwitcherObjectName +
+                              " 切换开关（默认）。");
+                    break;
+            }
+        }
+
+        [MenuItem(ModeSwitchPath, true, 150)]
+        private static bool UseSwitchModeValidate() { return MarkReplaceMode(); }
+
+        [MenuItem(ModeReplacePath, true, 151)]
+        private static bool UseReplaceModeValidate() { return MarkReplaceMode(); }
+
+        [MenuItem(ModeDuplicatePath, true, 152)]
+        private static bool MarkReplaceModeValidate() { return MarkReplaceMode(); }
+
+        private static bool MarkReplaceMode()
+        {
+            var mode = NonToonSwitcherSettings.instance.ReplaceMode;
+            Menu.SetChecked(ModeSwitchPath, mode == ReplaceMode.Switch);
+            Menu.SetChecked(ModeReplacePath, mode == ReplaceMode.ReplaceInPlace);
+            Menu.SetChecked(ModeDuplicatePath, mode == ReplaceMode.DuplicateThenReplace);
+            return true;
+        }
+
+        // ------------------------------------------------------------------ 描边后移倍数
+        //
+        // lilToon 的描边宽度贴图 NonToon 没有对应功能，转换时会把描边整体往后推
+        // 「描边宽度 × 0.01 × 倍数」。默认 1；觉得描边被推得太淡就调小，0 = 完全不推。
+
+        private const string OutlineFactorRoot = "Tools/LilToNonToon Switcher/描边后移倍数/";
+        private static readonly float[] OutlineFactors = { 0f, 0.5f, 1f, 1.5f, 2f };
+        private static readonly string[] OutlineFactorNames = { "0（不处理）", "0.5", "1（默认）", "1.5", "2" };
+
+        [MenuItem(OutlineFactorRoot + "0（不处理）", false, 160)]
+        private static void OutlineFactor0() { SetOutlineFactor(0f); }
+
+        [MenuItem(OutlineFactorRoot + "0.5", false, 161)]
+        private static void OutlineFactor05() { SetOutlineFactor(0.5f); }
+
+        [MenuItem(OutlineFactorRoot + "1（默认）", false, 162)]
+        private static void OutlineFactor1() { SetOutlineFactor(1f); }
+
+        [MenuItem(OutlineFactorRoot + "1.5", false, 163)]
+        private static void OutlineFactor15() { SetOutlineFactor(1.5f); }
+
+        [MenuItem(OutlineFactorRoot + "2", false, 164)]
+        private static void OutlineFactor2() { SetOutlineFactor(2f); }
+
+        private static void SetOutlineFactor(float value)
+        {
+            NonToonSwitcherSettings.instance.OutlineZOffsetFactor = value;
+            Debug.Log("[LilToNonToon] 描边后移倍数 = " + value.ToString("0.##") +
+                      "（描边整体后移 = 描边宽度 × 0.01 × 倍数，只对用了描边宽度贴图的材质生效）");
+        }
+
+        [MenuItem(OutlineFactorRoot + "0（不处理）", true, 160)]
+        private static bool OutlineFactor0Validate() { return MarkOutlineFactor(); }
+
+        [MenuItem(OutlineFactorRoot + "0.5", true, 161)]
+        private static bool OutlineFactor05Validate() { return MarkOutlineFactor(); }
+
+        [MenuItem(OutlineFactorRoot + "1（默认）", true, 162)]
+        private static bool OutlineFactor1Validate() { return MarkOutlineFactor(); }
+
+        [MenuItem(OutlineFactorRoot + "1.5", true, 163)]
+        private static bool OutlineFactor15Validate() { return MarkOutlineFactor(); }
+
+        [MenuItem(OutlineFactorRoot + "2", true, 164)]
+        private static bool OutlineFactor2Validate() { return MarkOutlineFactor(); }
+
+        private static bool MarkOutlineFactor()
+        {
+            var current = NonToonSwitcherSettings.instance.OutlineZOffsetFactor;
+            for (var i = 0; i < OutlineFactors.Length; i++)
+            {
+                Menu.SetChecked(OutlineFactorRoot + OutlineFactorNames[i],
+                    Mathf.Abs(current - OutlineFactors[i]) < 0.001f);
+            }
+            return true;
+        }
+
         public static ConvertRequest BuildRequestFromSettings(NonToonSwitcherSettings settings, bool createSwitcher)
         {
+            var mode = settings.ReplaceMode;
+            var wantsSwitcher = createSwitcher && mode == ReplaceMode.Switch;
             return new ConvertRequest
             {
                 Targets = Selection.gameObjects,
                 OutputFolder = settings.OutputFolder,
                 ApplyToSelectionImmediately = true,
-                CreateSwitcher = createSwitcher,
-                CreateMenuToggle = settings.CreateMenuToggle,
+                CreateSwitcher = wantsSwitcher,
+                CreateMenuToggle = settings.CreateMenuToggle && wantsSwitcher,
                 NonToonOnByDefault = settings.SetNonToonOnByDefault,
                 BakeSharedMask = settings.BakeSharedMask,
                 BakeBaseTexture = settings.BakeBaseTexture,
@@ -116,6 +233,8 @@ namespace NonToonSwitcher
                 ReuseExistingSwitcher = settings.ReuseExistingSwitcher,
                 MenuParameter = settings.MenuParameterName,
                 MenuLabel = settings.MenuLabel,
+                ReplaceMode = mode,
+                ReplaceMaterialsOnRenderers = mode == ReplaceMode.ReplaceInPlace,
             };
         }
     }

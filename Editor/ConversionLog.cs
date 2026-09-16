@@ -92,6 +92,12 @@ namespace NonToonSwitcher
         /// <summary>切换对象里累计的条目数（复用时会累加）。</summary>
         public int SwitchEntryCount;
 
+        /// <summary>true 表示这次把渲染器上的材质直接换成了 NonToon（没有切换开关）。</summary>
+        public bool ReplacedOnRenderers;
+
+        /// <summary>「复制一份再换」时生成的副本对象（形如 <名字>_nontoon）。</summary>
+        public readonly List<string> DuplicatedObjects = new List<string>();
+
         public bool Success { get { return Errors.Count == 0; } }
 
         public void Warn(string message) { if (!string.IsNullOrEmpty(message)) Warnings.Add(message); }
@@ -109,6 +115,19 @@ namespace NonToonSwitcher
                     ? "切换对象    : " + SwitchObject.name + "（复用已有开关，本次新增 " + SwitchEntryCount + " 条）"
                     : "切换对象    : " + SwitchObject.name + "（新建，共 " + SwitchEntryCount + " 条）");
             }
+            else if (ReplacedOnRenderers)
+            {
+                sb.AppendLine("转换方式    : 直接把渲染器上的材质换成了 NonToon（没有建切换开关）");
+            }
+
+            if (DuplicatedObjects.Count > 0)
+            {
+                sb.AppendLine("副本对象    : " + DuplicatedObjects.Count + " 个");
+                foreach (var name in DuplicatedObjects) sb.AppendLine("              " + name);
+                sb.AppendLine("              想换回 lilToon 就把原对象重新勾上（场景里会同时存在两个 avatar 描述符，");
+                sb.AppendLine("              上传时选 _nontoon 那一份即可）。");
+            }
+
             sb.AppendLine();
 
             foreach (var error in Errors) sb.AppendLine("[错误] " + error);

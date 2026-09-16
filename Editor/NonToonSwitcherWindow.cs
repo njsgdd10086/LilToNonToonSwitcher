@@ -104,6 +104,41 @@ namespace NonToonSwitcher
                     MessageType.Info);
             }
 
+            var replaceLabels = new[]
+            {
+                "保留原材质 + 建切换开关（默认）",
+                "直接替换成 NonToon（原地替换，不回退）",
+                "复制一份 " + NonToonConverter.DuplicateSuffix + " 后替换（原对象取消勾选，推荐）",
+            };
+            var replaceIndex = (int)settings.ReplaceMode;
+            var newReplaceIndex = EditorGUILayout.Popup(
+                new GUIContent("转换方式",
+                    "保留原材质：Renderer 上还是 lilToon，靠菜单开关切成 NonToon。\n" +
+                    "原地替换：直接把 Renderer 上的材质换成 NonToon，不建开关（想回退只能 Ctrl+Z）。\n" +
+                    "复制一份：把选中对象复制成 <名字>" + NonToonConverter.DuplicateSuffix +
+                    "，材质换在副本上，原对象自动取消勾选 —— 想回退就把它勾回来。"),
+                replaceIndex, replaceLabels);
+            if (newReplaceIndex != replaceIndex)
+                settings.ReplaceMode = (ReplaceMode)newReplaceIndex;
+
+            if (settings.ReplaceMode == ReplaceMode.DuplicateThenReplace)
+            {
+                EditorGUILayout.HelpBox(
+                    "转换后会复制一份 <名字>" + NonToonConverter.DuplicateSuffix + "（材质为 NonToon），" +
+                    "原对象保留 lilToon 材质但自动取消勾选。场景里会同时存在两个 Avatar 描述符，上传时选 " +
+                    NonToonConverter.DuplicateSuffix + " 那一份即可；想回到 lilToon 就把原对象重新勾上、" +
+                    "把副本取消勾选。",
+                    MessageType.Info);
+            }
+            else if (settings.ReplaceMode == ReplaceMode.ReplaceInPlace)
+            {
+                EditorGUILayout.HelpBox(
+                    "会把选中对象上的材质原地换成 NonToon，不创建切换开关，也不保留副本 —— " +
+                    "替换后只能靠 Ctrl+Z 或版本管理回退。想要保险就选「复制一份 " +
+                    NonToonConverter.DuplicateSuffix + " 后替换」。",
+                    MessageType.Warning);
+            }
+
             _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "高级设置");
             if (_showAdvanced)
             {
@@ -120,6 +155,13 @@ namespace NonToonSwitcher
                     new GUIContent("生成阴影渐变",
                         "由 lilToon 的阴影色、边缘阴影色生成 Shader Core 的 Gradient（.scgradients）。"),
                     settings.BakeGradients);
+                settings.OutlineZOffsetFactor = EditorGUILayout.Slider(
+                    new GUIContent("描边后移倍数",
+                        "lilToon 的描边宽度贴图（_OutlineWidthMask）NonToon 没有对应功能：作者常用它把嘴唇、眼睛附近的" +
+                        "描边宽度压成 0，NonToon 的描边却是均匀的，会糊在五官上。\n" +
+                        "转换时把描边整体后移「描边宽度 × 0.01 × 这个倍数」来避开：1 = 与描边自身宽度同量级（默认）；" +
+                        "0 = 不处理；觉得描边被推得太淡就调小。"),
+                    settings.OutlineZOffsetFactor, 0f, 3f);
                 settings.LogToConsole = EditorGUILayout.Toggle("输出日志到 Console", settings.LogToConsole);
                 EditorGUI.indentLevel--;
             }

@@ -119,6 +119,25 @@ Assets/NonToonConverted/衣服/
 两种模式都配合 `MA Menu Item` 生成开关。MA 在构建 avatar 时自动生成切换动画，
 不需要手写动画与 Animator。
 
+### 转换方式（三选一）
+
+菜单 `Tools > LilToNonToon Switcher > 转换方式 >` 里三选一，设置窗口里也有同样的下拉：
+
+| 方式 | 结果 | 说明 |
+| --- | --- | --- |
+| **保留原材质 + 建切换开关**（默认） | Renderer 上还是 lilToon，靠菜单开关切到 NonToon | 游戏里可以随时切，最灵活 |
+| 直接替换成 NonToon（原地替换） | 选中对象上的材质**原地**换成 NonToon，不建开关 | 干脆，但想回退只能 `Ctrl+Z` 或版本管理 |
+| 复制一份 `_nontoon` 后替换 | 复制出 `<名字>_nontoon`（材质是 NonToon），**原对象保留 lilToon 但自动取消勾选** | 相当于"直接替换 + 留退路"：想回退就把原对象勾回来 |
+
+「复制一份」的细节：
+
+- 副本命名 `<原对象名>_nontoon`（例如 `avtr` → `avtr_nontoon`），排在原对象后面，层级/组件/位置完全一致；
+- 副本里会自动删掉之前生成的 `_NonToonSwitch`（否则副本里既有 NonToon 材质、又有会切回 lilToon 的开关，互相打架）；
+- **重复转换会复用已有的同名副本**，不会越转越多；
+- 副本创建、原对象取消勾选都走 Undo，`Ctrl+Z` 可以撤销；
+- 场景里会同时存在两个 Avatar 描述符，上传时选 `_nontoon` 那一份即可（原对象是取消勾选状态，不参与构建）；
+- 副本是普通对象（`Instantiate` 出来的），不会挂回 prefab。如果你的头像根是 prefab 实例，副本就与 prefab 脱钩了。
+
 ### 全部菜单项
 
 | 菜单 | 作用 |
@@ -131,6 +150,10 @@ Assets/NonToonConverted/衣服/
 | `Tools > LilToNonToon Switcher > 设置与转换窗口` | 设置窗口 |
 | `Tools > LilToNonToon Switcher > 转换时复用已有的 _NonToonSwitch` | ✅ 打勾＝复用（默认）：同一 avatar 下已存在开关时把新材质追加进去 |
 | `Tools > LilToNonToon Switcher > 转换时总是新建 _NonToonSwitch` | ✅ 打勾＝每次转换都新建一个开关（会产生多个） |
+| `Tools > LilToNonToon Switcher > 转换方式 > 保留原材质 + 建切换开关（默认）` | ✅ 打勾＝默认方式：保留 lilToon 材质，另建切换开关 |
+| `Tools > LilToNonToon Switcher > 转换方式 > 直接替换成 NonToon（原地替换）` | ✅ 打勾＝原地换材质，不建开关（回退只能靠 Ctrl+Z） |
+| `Tools > LilToNonToon Switcher > 转换方式 > 复制一份 _nontoon 后替换（原对象取消勾选）` | ✅ 打勾＝复制一份 `<名字>_nontoon` 换成 NonToon，原对象取消勾选（可回退） |
+| `Tools > LilToNonToon Switcher > 描边后移倍数 > 0 / 0.5 / 1 / 1.5 / 2` | ✅ 打勾＝当前倍数（默认 1）。只影响"源材质挂了描边宽度贴图"的材质，详见下面「描边宽度贴图」一节 |
 | `Tools > LilToNonToon Switcher > 环境检查` | 输出 lilToon / NonToon / MA 的安装情况到 Console |
 | `Tools > LilToNonToon Switcher > 导出为 unitypackage` | 源码放在 `Assets/LilToNonToonSwitcher` 时可重新打包 |
 
@@ -159,7 +182,7 @@ Assets/NonToonConverted/衣服/
 | `_BumpMap` / `_BumpScale` | `_NormalMap` / `_NormalScale` | 直接复制 |
 | `_Cutoff` | `_Cutoff` | 直接复制 |
 | 渲染模式（`_TransparentMode` 或 shader 名） | `_RenderingMode` + Blend / Queue / ZWrite | 先按 **shader 名字**判断（lilToon 选了模式后材质会换成 `Hidden/lilToonCutout`、`Hidden/lilToonTransparentOutline`、`Hidden/lilToonTwoPassTransparent` 这类隐藏变体，那些材质的 `_TransparentMode` 常常还是 0），再退回属性。`_RenderingMode` 只决定 NonToon 怎么处理 Alpha（不透明强制 1 / 镂空做剪切 / 透明保留）；混合方式、`_ZWrite`、`_Cull`、`_AlphaToMask`、渲染队列**沿用原材质**（lilToon 这些值都是材质驱动的，作者常故意调成「透明混合但写深度、待在几何队列」，例如 MANUKA 的脸和头发），原材质没有这些属性时才用 NonToon 自己的模式默认值 |
-| `_OutlineColor` / `_OutlineWidth` / `_OutlineZBias` | `_OutlineColor` / `_OutlineWidth` / `_OutlineZOffset` | 近似复制 |
+| `_OutlineColor` / `_OutlineWidth` / `_OutlineZBias` | `_OutlineColor` / `_OutlineWidth` / `_OutlineZOffset` | 近似复制；源材质挂了 `_OutlineWidthMask` 时另外把描边后移（见「描边宽度贴图」） |
 | `_OutlineVertexR2Width` | `_OutlineFromVertexColor` | 用顶点色控制描边宽度 |
 | `_AlphaMask` | `_SharedMask`（对应通道） | 烘焙进共享遮罩 |
 | `_RimColorTex` / `_BacklightColorTex` / `_MatCapBlendMask` / `_ReflectionColorTex` | `_SharedMask` | 读取各模块的 Mask Channel 设置，写进对应通道 |
@@ -178,7 +201,26 @@ NonToon 0.1.x 里没有对应项的功能，**不会被悄悄丢掉**，而是�
 - Main 2nd / 3rd（贴花）、UV 动画
 - MatCap 2nd、Reflection Cube、Metallic
 - Fur 的细节设置、Gem、Refraction
-- 描边的贴图与宽度遮罩（只搬颜色和粗细）
+- 描边的贴图（`_OutlineTex`）；宽度遮罩（`_OutlineWidthMask`）见下面「描边宽度贴图」
+
+### 描边宽度贴图（`_OutlineWidthMask`）
+
+NonToon 没有"逐像素描边宽度"这个功能，它的描边是**均匀**的反向外扩壳，所以这里做了一次补偿：
+
+lilToon 的作者常用宽度遮罩把**嘴唇、眼睛附近的描边宽度压成 0**（描边壳不该压在五官上）。到了 NonToon，
+这些位置照样外扩，而且描边壳采样的是该处 UV 的基础贴图颜色 —— 看起来就像脸在嘴部被"撕破"。
+
+转换时因此会把描边**整体沿视线方向后移** `描边宽度 × 0.01 × 倍数`（写进 `_OutlineZOffset`）：
+
+- `× 0.01` 是 NonToon 自己的换算（`pos += N * _OutlineWidth * 0.01`），所以后移量正好等于描边自身的外扩距离；
+- 描边壳上任何顶点都不会比原位更靠近相机 → 有表面挡着的地方必然被深度测试剔除；
+- 剪影处法线垂直于视线，后移不改变屏幕位置，**描边依旧保留**。
+
+倍数默认 **1**，可在 `转换方式` 同级的 `描边后移倍数` 菜单里选 `0 / 0.5 / 1 / 1.5 / 2`，
+或在设置窗口「高级设置」里用滑条（0–3）微调：调小＝描边更明显但凹处风险回升，调大＝更保险但描边可能被邻近几何吃掉，
+**0 = 不做处理**（回到会糊住嘴唇的旧行为）。
+
+只有「源材质的 `_OutlineWidthMask` 上真的挂了贴图」时才会写这个值，其它材质完全不动。
 
 ## 五、转换日志
 
