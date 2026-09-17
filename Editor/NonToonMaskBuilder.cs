@@ -74,15 +74,30 @@ namespace NonToonSwitcher
                 if (texture == null) continue;
 
                 var channelProperty = FindChannelProperty(shader, source.ModuleKeyword);
-                var channel = channelProperty == null
+                // NonToon 每个模块的「Mask Channel」默认都是 A，一个材质里往往有好几个 lilToon 遮罩
+                // （描边宽度、边缘光、发丝高光…）→ 全挤在 A 通道上，最后只有一个能留下。
+                // 这里给每个要烘的遮罩**分配一个空闲通道**，并把模块指向它。
+                var preferred = channelProperty == null
                     ? 0
                     : Mathf.Clamp(ShaderUtility.GetIntValue(nonToonMaterial, channelProperty), 0, 3);
-                if (channelOwner[channel] != null)
+                var channel = -1;
+                if (channelOwner[preferred] == null) channel = preferred;
+                else
+                    for (var c = 0; c < 4; c++)
+                        if (channelOwner[c] == null) { channel = c; break; }
+
+                if (channel < 0)
                 {
-                    log.Warn(source.FeatureName + " 和 " + channelOwner[channel] + " 都指向 NonToon 共享遮罩的 " +
-                             "RGBA"[channel] + " 通道，只烘焙了 " + channelOwner[channel] +
-                             "。想两个都保留，请在转换后的材质上改掉其中一个的 Mask Channel。");
+                    log.Warn(source.FeatureName + " 没找到空闲的共享遮罩通道（4 个都被占了），这个遮罩没有烘焙。" +
+                             "需要的话请在转换后的材质上腾一个通道出来。");
                     continue;
+                }
+
+                if (channelProperty != null && channel != preferred)
+                {
+                    ShaderUtility.SetIntPersistent(nonToonMaterial, channelProperty, channel);
+                    log.Mapped(source.FeatureName,
+                        "写入共享遮罩的 " + "RGBA"[channel] + " 通道（模块的 Mask Channel 也随之改为 " + "RGBA"[channel] + "）");
                 }
 
                 if (!ReadPixels(texture, out var texturePixels, out var textureWidth, out var textureHeight, log, source.FeatureName))
