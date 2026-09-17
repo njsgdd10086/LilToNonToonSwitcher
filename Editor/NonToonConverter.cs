@@ -269,7 +269,7 @@ namespace NonToonSwitcher
                 return;
             }
 
-            var gradients = NonToonTextureBaker.BakeGradients(source, destination, folder, out var bakedIndices, log);
+            var gradients = NonToonTextureBaker.BakeGradients(source, destination, folder, out var shadeIndex, out var rimShadeIndex, log);
             if (gradients == null)
             {
                 // Without a ramp the Shade module would sample an empty array, which renders black, so the
@@ -284,10 +284,8 @@ namespace NonToonSwitcher
             if (gradients is Texture gradientTexture && ShaderUtility.HasProperty(destination, "_SharedGradients"))
                 destination.SetTexture("_SharedGradients", gradientTexture);
 
-            // Only point a module at a slice that really exists: the Shade slice is baked first, the RimShade
-            // slice right after it, and anything else must stay at -1 or the shader samples out of range.
-            var shadeIndex = bakedIndices.Count > 0 ? bakedIndices[0] : -1;
-            var rimShadeIndex = bakedIndices.Count > 1 ? bakedIndices[1] : -1;
+            // 每个模块用烘焙时记下的**自己的**切片索引：只有 RimShade 被烘出来时它的索引是 0，
+            // 按位置当成 Shade 的索引会让两个模块串位（Shade 采到边缘阴影的渐变、RimShade 反而关掉）。
             if (shadeProperty != null) ShaderUtility.SetIntPersistent(destination, shadeProperty, shadeIndex);
             if (rimShadeProperty != null) ShaderUtility.SetIntPersistent(destination, rimShadeProperty, rimShadeIndex);
             EditorUtility.SetDirty(destination);
@@ -570,11 +568,10 @@ namespace NonToonSwitcher
         /// </summary>
         private static string FixPremultipliedBlend(Material target)
         {
-            var fixedNames = new List<string>();
-            if (TryTranslate(target, "_SrcBlend", "_DstBlend")) fixedNames.Add("_SrcBlend");
-            if (TryTranslate(target, "_SrcBlendAlpha", "_DstBlendAlpha")) fixedNames.Add("_SrcBlendAlpha");
-            if (fixedNames.Count == 0) return null;
-            return string.Join("/", fixedNames.ToArray()) + "=5（lilToon 预乘 alpha → NonToon 用 SrcAlpha 等价换算）";
+            // 只换算 _SrcBlend：lilToon 预乘的是**颜色**通道，alpha 通道那对系数（_SrcBlendAlpha /
+            // _DstBlendAlpha）并没有预乘，照搬才对（写成 SrcAlpha 会让目标 alpha 变成 a²）。
+            if (!TryTranslate(target, "_SrcBlend", "_DstBlend")) return null;
+            return "_SrcBlend=5（lilToon 预乘 alpha → NonToon 用 SrcAlpha 等价换算）";
         }
 
         private static bool TryTranslate(Material target, string srcName, string dstName)

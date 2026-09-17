@@ -136,7 +136,23 @@ namespace NonToonSwitcher
 
             // ----- normal map -----
             MapTexture("_BumpMap", "_NormalMap", "法线贴图");
-            MapFloat("_BumpScale", "_NormalScale", "法线强度");
+            // lilToon 的 `_BumpScale` 只是一张"备用"数值：法线贴图没挂时它完全不参与渲染，
+            // 但作者往往调过（遇到过 8.17 这种值）。照搬到 NonToon 上会把默认白贴图也当成法线放大，
+            // 所以没挂贴图时直接写 0（等于关掉）。
+            MapFunc("_BumpScale", "_NormalScale", (src, dst, log) =>
+            {
+                if (!ShaderUtility.HasProperty(dst, "_NormalScale")) return;
+                var hasMap = ShaderUtility.HasProperty(src, "_BumpMap") && src.GetTexture("_BumpMap") != null;
+                if (!hasMap)
+                {
+                    dst.SetFloat("_NormalScale", 0f);
+                    log.Mapped("_BumpScale（源材质没挂法线贴图）", "_NormalScale = 0（关掉）");
+                    return;
+                }
+                var scale = src.GetFloat("_BumpScale");
+                dst.SetFloat("_NormalScale", scale);
+                log.Mapped("_BumpScale " + scale.ToString("0.###"), "_NormalScale");
+            }, "法线强度");
             MapToggle("_UseBumpMap", "_NormalMap", "法线贴图");
 
             // ----- outline -----
@@ -292,12 +308,18 @@ namespace NonToonSwitcher
             {
                 if (!ShaderUtility.HasProperty(dst, "_Roughness")) return;
 
-                // lilToon does not draw a reflection when _UseReflection is off, so NonToon keeps its default.
-                if (ShaderUtility.HasProperty(src, "_UseReflection") && src.GetFloat("_UseReflection") == 0f) return;
-
-                // _NormalMapWithRoughness is read from the serialized data only: Material.GetInt logs an error
-                // for that integer property.
+                // _NormalMapWithRoughness 读序列化值（Material.GetInt 对整数属性会报错）
                 if (ShaderUtility.ReadSerializedInt(dst, "_NormalMapWithRoughness", 0) != 0) return;
+
+                // lilToon 没开反射（_UseReflection = 0）时根本不画高光 → 对应 NonToon 的"最粗糙"。
+                // 以前这里直接 return，结果留下 NonToon 的默认 0.5，等于凭空多出一个高光。
+                var reflectOn = !ShaderUtility.HasProperty(src, "_UseReflection") || src.GetFloat("_UseReflection") != 0f;
+                if (!reflectOn)
+                {
+                    dst.SetFloat("_Roughness", 1f);
+                    log.Mapped("_UseReflection = 0（源材质没有高光）", "_Roughness = 1（无高光）");
+                    return;
+                }
 
                 var smoothness = src.GetFloat("_Smoothness");
                 var roughness = Mathf.Clamp(1f - smoothness, 0.05f, 1f);

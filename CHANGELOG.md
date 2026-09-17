@@ -2,6 +2,41 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.9] - 2026-09-17
+
+这一版是**跟另一个 lilToon→NonToon 转换插件逐属性对拍**（16 对材质、同一套 NonToon 属性）找出来的问题。
+
+### 修复
+
+- **阴影 / 边缘阴影的渐变索引串位**：只烘出 RimShade、没烘 Shade 时（源材质 `_UseShadow = 0`
+  但 `_UseRimShade = 1`），RimShade 的切片索引是 `0`，而我们按"位置"把 `bakedIndices[0]` 当成
+  Shade 的索引 → **Shade 模块采到了边缘阴影的渐变，RimShade 反而被关掉**。
+  现在烘焙时按模块分别记下自己的索引（`ShadeIdx = -1`、`RimShadeIdx = 0`）。
+
+- **凭空多出的高光**：源材质 `_UseReflection = 0`（lilToon 不画高光）时我们直接跳过映射，
+  结果留下 NonToon 的默认 `_Roughness = 0.5` → 多出一个高光。现在这种情况写 `_Roughness = 1`（无高光）。
+  受影响的是绝大多数材质（`M_Alpha_1/2`、`M_Bandage`、`M_Body_*`、`M_Hair*`、`M_Eye`、`M_Shoes` …）。
+
+- **法线强度照搬了无效值**：lilToon 的 `_BumpScale` 在**没挂法线贴图**时完全不参与渲染，但作者往往
+  调过（实测有 `8.17` 这种值）。照搬到 NonToon 会把默认白贴图也当成法线放大。现在没挂贴图时写 `_NormalScale = 0`。
+
+- **alpha 通道的混合系数被误解**：1.1.7 加预乘 alpha 换算时，把 `_SrcBlendAlpha / _DstBlendAlpha`
+  也一起换成了 `SrcAlpha`。但 lilToon 预乘的是**颜色**通道，alpha 通道并没有预乘（写成 SrcAlpha 会让
+  目标 alpha 变成 `a²`），现在只换算 `_SrcBlend`。
+
+### 顺带确认（这些我们是对的，另一个插件反而有问题）
+
+对拍时逐项回源材质核对，以下差异是**对方**的 bug，不是我们的：
+
+| 项目 | 源材质 | 我们 | 另一个插件 |
+| --- | --- | --- | --- |
+| `_OutlineWidth`（6 个材质） | 0.112 | 0.112 ✓ | **0**（描边丢了） |
+| `_OutlineColor`（5 个材质） | (0.783,0.544,0.513) | 同源 ✓ | (0.6,0.45,0.55)（NonToon 默认色） |
+| Stencil（8 个材质） | `_StencilRef=146` 等 | 照搬 ✓ | **全部清零**（lilToon 的 shader 确实用 stencil 做遮罩） |
+| `M_HairShadow` 混合 | `Zero / SrcColor`（正片叠底） | 0/3 ✓ | 5/10 |
+| `_OutlineVertexR2Width = 2` | 用顶点色当描边方向 | `_OutlineFromVertexColor=1` ✓ | 0 |
+| `_MatCapColor` | 源值 | 源值 ✓ | 默认 (1,1,1,1) |
+
 ## [1.1.8] - 2026-09-17
 
 ### 修复

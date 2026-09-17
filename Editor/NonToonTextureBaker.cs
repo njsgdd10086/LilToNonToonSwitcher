@@ -443,9 +443,10 @@ namespace NonToonSwitcher
         /// so the caller never points a module at a slice that does not exist (that reads as black).
         /// </summary>
         public static UnityEngine.Object BakeGradients(Material lilToonMaterial, Material nonToonMaterial, string folder,
-            out List<int> bakedIndices, ConversionLog log)
+            out int shadeIndex, out int rimShadeIndex, ConversionLog log)
         {
-            bakedIndices = new List<int>();
+            shadeIndex = -1;
+            rimShadeIndex = -1;
             var gradients = new List<Gradient>();
             var used = new List<string>();
 
@@ -453,15 +454,15 @@ namespace NonToonSwitcher
                                lilToonMaterial.GetFloat("_UseShadow") != 0f;
             if (shadeEnabled)
             {
+                shadeIndex = gradients.Count;
                 gradients.Add(BuildShadeGradient(lilToonMaterial, log));
-                bakedIndices.Add(0);
                 used.Add("_ShadowColor");
             }
 
             if (ShaderUtility.HasProperty(lilToonMaterial, "_UseRimShade") &&
                 lilToonMaterial.GetFloat("_UseRimShade") != 0f)
             {
-                bakedIndices.Add(gradients.Count);
+                rimShadeIndex = gradients.Count;
                 gradients.Add(BuildRimShadeGradient(lilToonMaterial));
                 used.Add("_RimShadeColor");
             }
@@ -477,7 +478,8 @@ namespace NonToonSwitcher
             if (asset == null)
             {
                 log.Warn("生成的渐变数组导入失败，NonToon 的阴影颜色仍是默认值。");
-                bakedIndices.Clear();
+                shadeIndex = -1;
+                rimShadeIndex = -1;
                 return null;
             }
 
