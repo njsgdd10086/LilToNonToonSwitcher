@@ -173,24 +173,61 @@ namespace NonToonSwitcher
             {
                 var to = ShaderUtility.NtRimLightPrefix + "RimLightColor";
                 if (!ShaderUtility.HasProperty(dst, to)) return;
+                // lilToon 的 `_UseRim` 是这层效果的开关：作者关掉时（= 0）颜色值还留着，
+                // 照搬会在 NonToon 上凭空多出一圈边缘光（头发上特别明显）。
+                if (ShaderUtility.HasProperty(src, "_UseRim") && src.GetFloat("_UseRim") == 0f)
+                {
+                    dst.SetColor(to, Color.black);
+                    log.Mapped("_UseRim = 0（作者没启用边缘光）", to + " = 黑色（关掉）");
+                    return;
+                }
                 var color = src.GetColor("_RimColor");
                 if (color == Color.clear) return;
-                dst.SetColor(to, color);
-                log.Mapped("_RimColor", to);
+                // lilToon 的 _RimMainStrength 作用在边缘光强度上，等价于缩放颜色
+                var strength = ShaderUtility.HasProperty(src, "_RimMainStrength") ? src.GetFloat("_RimMainStrength") : 1f;
+                var rgb = new Color(color.r * strength, color.g * strength, color.b * strength, color.a);
+                dst.SetColor(to, rgb);
+                log.Mapped("_RimColor" + (Mathf.Abs(strength - 1f) > 0.001f ? " × _RimMainStrength " + strength.ToString("0.###") : ""), to);
             }, "边缘光颜色");
 
             MapFunc("_RimBorder", ShaderUtility.NtRimLightPrefix + "RimLightRange", (src, dst, log) =>
             {
                 var to = ShaderUtility.NtRimLightPrefix + "RimLightRange";
                 if (!ShaderUtility.HasProperty(dst, to)) return;
+                if (ShaderUtility.HasProperty(src, "_UseRim") && src.GetFloat("_UseRim") == 0f)
+                {
+                    dst.SetVector(to, new Vector4(1f, 1f, 0f, 0f));
+                    return;
+                }
                 var border = src.GetFloat("_RimBorder");
                 var blur = Mathf.Max(0.001f, src.GetFloat("_RimBlur"));
                 if (border <= 0f) return;
-                var low = Mathf.Clamp01(border - blur * 0.5f);
-                var high = Mathf.Clamp01(border + blur * 0.5f);
+
+                // lilToon 的边缘光：`f = 1 - dot(N,V)` → `f = pow(f, _RimFresnelPower)` → 再用 border / blur
+                // 卡阈值。也就是说阈值和宽度都长在**幂次空间**里，而 NonToon 是在原始空间做 smoothstep，
+                // 所以要把它们换算回原始空间：阈值位置 = border^(1/p)，宽度 = blur / (p·center^(p-1))
+                //（就是 f^p 的导数，用来把幂次空间的宽度映射回原始空间）。
+                var power = ShaderUtility.HasProperty(src, "_RimFresnelPower")
+                    ? Mathf.Clamp(src.GetFloat("_RimFresnelPower"), 0.01f, 32f)
+                    : 1f;
+                float low, high;
+                if (Mathf.Abs(power - 1f) < 0.001f)
+                {
+                    low = Mathf.Clamp01(border - blur * 0.5f);
+                    high = Mathf.Clamp01(border + blur * 0.5f);
+                }
+                else
+                {
+                    var center = Mathf.Pow(Mathf.Clamp(border, 0.0001f, 1f), 1f / power);
+                    var slope = power * Mathf.Pow(Mathf.Max(center, 0.0001f), power - 1f);
+                    var width = Mathf.Clamp(blur / Mathf.Max(slope, 0.0001f), 0.01f, 1f);
+                    low = Mathf.Clamp01(center - width * 0.5f);
+                    high = Mathf.Clamp01(center + width * 0.5f);
+                }
                 dst.SetVector(to, new Vector4(low, high, 0f, 0f));
-                log.Mapped("_RimBorder", to + " (approximated from border + blur)");
-            }, "边缘光边界/模糊 -> 边缘光范围");
+                log.Mapped("_RimBorder/_RimBlur/_RimFresnelPower " + power.ToString("0.##"),
+                    to + " = (" + low.ToString("0.###") + ", " + high.ToString("0.###") + ")（换算回原始空间）");
+            }, "边缘光边界/模糊/菲涅尔幂 -> 边缘光范围");
 
             // ----- matcap -----
             MapFunc("_MatCapTex", ShaderUtility.NtMatCapsPrefix + "MatCapMultiply", (src, dst, log) =>

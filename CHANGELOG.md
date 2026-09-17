@@ -2,6 +2,41 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.8] - 2026-09-17
+
+### 修复
+
+- **不该有的边缘光**：lilToon 的 `_UseRim` 是这层效果的开关，作者关掉时（= 0）颜色值仍然留在材质里。
+  我们之前无条件照搬 `_RimColor`，于是**在作者没启用边缘光的材质上凭空多出一圈边缘光**
+  （头发上最明显）。现在 `_UseRim = 0` 时写黑色并把范围推到 `(1, 1)`（等于关掉），日志会写明：
+
+  ```
+  · _UseRim = 0（作者没启用边缘光）  ->  _jp_lilxyzw_nontoon_rimlight_RimLightColor = 黑色（关掉）
+  ```
+
+- **边缘光的形状（菲涅尔幂）没换算**：lilToon 的边缘光是把 `f = 1 − dot(N,V)` 先取
+  `pow(f, _RimFresnelPower)`，再用 `_RimBorder` / `_RimBlur` 在**幂次空间**卡阈值；
+  NonToon 是在原始空间做 smoothstep。我们之前直接把 `border ± blur/2` 填进范围，等于用了错误的曲线
+  （边缘光过宽、贴不到轮廓）。现在按数学关系换算回原始空间：
+
+  ```
+  阈值位置 = border^(1/power)
+  宽度     = blur / (power · center^(power-1))      ← f^p 的导数
+  ```
+
+  实测两套材质的换算结果与另一个转换插件（同样是 NonToon + 独立换算）几乎重合：
+
+  | 材质 | `_RimBorder` / `_RimBlur` / power | 现在 | 另一个插件 |
+  | --- | --- | --- | --- |
+  | `M_Hair` | 0.51 / 0.36 / 2.4 | (0.644, 0.866) | (0.60, 0.90) |
+  | `M_Body_Skin` | 0.739 / 0.661 / 3 | (0.769, 1.000) | (0.75, 0.98) |
+
+- 边缘光颜色现在会乘上 `_RimMainStrength`（lilToon 里它作用在边缘光强度上，等价于缩放颜色）。
+
+### 说明
+
+- 源材质要是没写 `_UseRim`（老材质），仍然按"启用"处理，行为不变。
+
 ## [1.1.7] - 2026-09-17
 
 ### 修复
