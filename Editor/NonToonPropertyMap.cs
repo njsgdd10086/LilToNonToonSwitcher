@@ -136,6 +136,52 @@ namespace NonToonSwitcher
 
             // ----- normal map -----
             MapTexture("_BumpMap", "_NormalMap", "法线贴图");
+            // lilToon 的法线贴图在 NonToon 里要接**两份**：
+            //   · 主 `_NormalMap` —— 只影响 sd.N（toon 硬色阶下的明暗分界 / 高光），细密纹理基本看不出来；
+            //   · Details 模块的 `_Detail0NormalMap` —— 影响 sd.N_detail，而 Shade 模块**真的**用
+            //     `NdotL_Detail` 参与明暗计算 → 织物那种质感就是靠这条显示出来的。
+            // 只接主 Normal Map 时，布料会变成"塑料感、纹理糊掉"。
+            MapFunc("_BumpMap", "_jp_lilxyzw_nontoon_details_Detail0NormalMap", (src, dst, log) =>
+            {
+                const string prefix = "_jp_lilxyzw_nontoon_details_";
+                var normal = prefix + "Detail0NormalMap";
+                if (!ShaderUtility.HasProperty(dst, normal)) return;
+                var texture = ShaderUtility.HasProperty(src, "_BumpMap") ? src.GetTexture("_BumpMap") : null;
+                if (texture == null) return;
+
+                ShaderUtility.SetTextureValue(dst, normal, texture);
+                if (ShaderUtility.HasProperty(dst, prefix + "Detail0NormalScale"))
+                    ShaderUtility.SetFloatValue(dst, prefix + "Detail0NormalScale",
+                        ShaderUtility.HasProperty(src, "_BumpScale") ? src.GetFloat("_BumpScale") : 1f);
+                // 细节层的 UV 走 _Detail0Texture_ST，跟随源法线贴图自己的 tiling/offset
+                if (ShaderUtility.HasProperty(dst, prefix + "Detail0Texture"))
+                {
+                    dst.SetTextureScale(prefix + "Detail0Texture", src.GetTextureScale("_BumpMap"));
+                    dst.SetTextureOffset(prefix + "Detail0Texture", src.GetTextureOffset("_BumpMap"));
+                }
+
+                // 打开 Details 模块：写整数 + Shader Core 认的关键字（和 MatCap 一模一样的坑）
+                var enable = prefix + "Enable";
+                if (ShaderUtility.HasProperty(dst, enable))
+                {
+                    if (ShaderUtility.ReadSerializedInt(dst, enable, 0) == 0)
+                    {
+                        ShaderUtility.SetIntPersistent(dst, enable, 1);
+                        log.Mapped("_BumpMap → Details 模块", enable + " = 1（让法线参与明暗）");
+                    }
+                    // Details 一旦打开，四层细节都会 `albedo *= lerp(1, detailTex * boost, mask)`，
+                    // 而默认 `_DetailMask` 是白的（= 全部生效）—— boost 必须是 1，否则基础色会被整体提亮/压暗。
+                    for (var i = 0; i < 4; i++)
+                    {
+                        var boost = prefix + "Detail" + i + "Boost";
+                        if (ShaderUtility.HasProperty(dst, boost)) ShaderUtility.SetFloatValue(dst, boost, 1f);
+                    }
+                    var key = enable.ToUpperInvariant();
+                    dst.EnableKeyword(key + "_1");
+                    dst.DisableKeyword(key + "_0");
+                }
+                log.Mapped("_BumpMap（同时接到 Details 的 Detail0NormalMap）", normal);
+            }, "法线贴图 → Details 模块：需要安装 NonToon 的 Details 模块。");
             // lilToon 的 `_BumpScale` 只是一张"备用"数值：法线贴图没挂时它完全不参与渲染，
             // 但作者往往调过（遇到过 8.17 这种值）。照搬到 NonToon 上会把默认白贴图也当成法线放大，
             // 所以没挂贴图时直接写 0（等于关掉）。
@@ -307,6 +353,42 @@ namespace NonToonSwitcher
                 log.Mapped("_MatCapColor " + color.ToString("0.###"), to);
             }, "MatCap 颜色：需要安装 NonToon 的 MatCaps 模块。");
 
+            // ----- matcap（第二层）-----
+            // NonToon 的两个槽其实是**两层** MatCap（各自带颜色 / Detail / Mask Channel），
+            // 不是"同一个的第一层两种混合模式"。第一层按混合模式占了一个槽之后，第二层就用**剩下那个**。
+            // 以前完全没转第二层（连贴图都没映射），所以走第二层的装饰（比如帽子的羽毛）转完就一直是灰的。
+            MapFunc("_MatCap2ndTex", ShaderUtility.NtMatCapsPrefix + "MatCapMultiply", (src, dst, log) =>
+            {
+                if (ShaderUtility.HasProperty(src, "_UseMatCap2nd") && src.GetFloat("_UseMatCap2nd") == 0f) return;
+                var texture = ShaderUtility.HasProperty(src, "_MatCap2ndTex") ? src.GetTexture("_MatCap2ndTex") : null;
+                if (texture == null) return;
+
+                var to = SecondMatCapSlot(src);
+                if (!ShaderUtility.HasProperty(dst, to))
+                {
+                    log.Unsupported("MatCap 第二层：需要安装 NonToon 的 MatCaps 模块。");
+                    return;
+                }
+                ShaderUtility.SetTextureValue(dst, to, texture);
+                log.Mapped("_MatCap2ndTex", to + "（第二层；第一层用的是另一个槽）");
+                EnableMatCapsModule(dst, log);
+            }, "MatCap 第二层贴图：需要安装 NonToon 的 MatCaps 模块。");
+
+            MapFunc("_MatCap2ndColor", ShaderUtility.NtMatCapsPrefix + "MatCapMultiplyColor", (src, dst, log) =>
+            {
+                if (ShaderUtility.HasProperty(src, "_UseMatCap2nd") && src.GetFloat("_UseMatCap2nd") == 0f) return;
+                var texture = ShaderUtility.HasProperty(src, "_MatCap2ndTex") ? src.GetTexture("_MatCap2ndTex") : null;
+                if (texture == null) return;
+                var to = SecondMatCapSlot(src).Replace("MatCapAdd", "MatCapAddColor").Replace("MatCapMultiply", "MatCapMultiplyColor");
+                if (!ShaderUtility.HasProperty(dst, to)) return;
+                var color = ShaderUtility.HasProperty(src, "_MatCap2ndColor") ? src.GetColor("_MatCap2ndColor") : Color.white;
+                // lilToon 的 _MatCap2ndBlend 是这一层的强度，NonToon 没有单独的强度属性 → 乘进颜色里
+                var blend = ShaderUtility.HasProperty(src, "_MatCap2ndBlend") ? Mathf.Clamp01(src.GetFloat("_MatCap2ndBlend")) : 1f;
+                var scaled = new Color(color.r * blend, color.g * blend, color.b * blend, color.a);
+                dst.SetColor(to, scaled);
+                log.Mapped("_MatCap2ndColor × _MatCap2ndBlend " + blend.ToString("0.###"), to);
+            }, "MatCap 第二层颜色：需要安装 NonToon 的 MatCaps 模块。");
+
             // ----- specular / reflection -----
             // Aligned with how the reference lilToon -> NonToon conversion behaves:
             //   _UseReflection off -> leave NonToon's defaults alone (roughness 0.5, specular black),
@@ -371,8 +453,35 @@ namespace NonToonSwitcher
 
         // ------------------------------------------------------------------ table helpers
 
-        private static void MapTexture(string from, string to, string note, string unsupportedNote = null)
+        /// <summary>第一层 MatCap 占了一个槽之后，第二层用剩下的那个。</summary>
+        private static string SecondMatCapSlot(Material source)
         {
+            var multiply = ShaderUtility.NtMatCapsPrefix + "MatCapMultiply";
+            var add = ShaderUtility.NtMatCapsPrefix + "MatCapAdd";
+            var blendMode = ShaderUtility.HasProperty(source, "_MatCapBlendMode")
+                ? Mathf.RoundToInt(source.GetFloat("_MatCapBlendMode"))
+                : 3;
+            var first = blendMode == 3 ? multiply : add;
+            return first == add ? multiply : add;
+        }
+
+        /// <summary>打开 MatCaps 模块：写整数 + Shader Core 真正认的那个关键字。</summary>
+        private static void EnableMatCapsModule(Material target, ConversionLog log)
+        {
+            var enable = ShaderUtility.NtMatCapsPrefix + "Enable";
+            if (!ShaderUtility.HasProperty(target, enable)) return;
+            if (ShaderUtility.ReadSerializedInt(target, enable, 0) == 0)
+            {
+                ShaderUtility.SetIntPersistent(target, enable, 1);
+                log.Mapped("MatCap", enable + " = 1（打开 MatCaps 模块）");
+            }
+            var key = enable.ToUpperInvariant();
+            var value = ShaderUtility.ReadSerializedInt(target, enable, 1);
+            target.EnableKeyword(key + "_" + value);
+            target.DisableKeyword(key + "_" + (value == 0 ? 1 : 0));
+        }
+
+        private static void MapTexture(string from, string to, string note, string unsupportedNote = null)        {
             MapFunc(from, to, (src, dst, log) => { CopyTexture(src, dst, from, to, log, unsupportedNote); }, note);
         }
 

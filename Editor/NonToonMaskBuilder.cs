@@ -41,6 +41,8 @@ namespace NonToonSwitcher
             if (ShaderUtility.HasProperty(lilToonMaterial, "_MatCapBlendMode") &&
                 Mathf.RoundToInt(lilToonMaterial.GetFloat("_MatCapBlendMode")) == 3)
                 matCapModule = "MatCapMultiply";
+            // 第二层用剩下的那个槽（和 NonToonPropertyMap 里的分配规则一致）
+            var matCap2ndModule = matCapModule == "MatCapAdd" ? "MatCapMultiply" : "MatCapAdd";
 
             var sources = new List<MaskSource>
             {
@@ -50,9 +52,10 @@ namespace NonToonSwitcher
                 new MaskSource { LilToonProperty = "_RimColorTex", ModuleKeyword = "RimLight", FeatureName = "rim light mask" },
                 new MaskSource { LilToonProperty = "_ReflectionColorTex", ModuleKeyword = "Specular", FeatureName = "specular mask" },
                 new MaskSource { LilToonProperty = "_MatCapBlendMask", ModuleKeyword = matCapModule, FeatureName = "matcap mask" },
-                // 第二层 MatCap 的贴图（_MatCap2ndTex）我们没有转，所以它的遮罩也不要烘 ——
-                // 否则它会占掉一个通道、还把 MatCapAdd 模块的 Mask Channel 改到自己那个通道上，
-                // 结果第一层的金色遮罩被别的通道乘掉（实测就是这个：Add 槽读 G，而金色遮罩在 R）。
+                // 第二层 MatCap 现在**有转**了（贴图 -> 剩下的那个槽），所以它的遮罩也要烘，
+                // 而且必须挂到**第二层实际用的那个槽**上（第一层占了一个，第二层就是另一个）。
+                new MaskSource { LilToonProperty = "_MatCap2ndBlendMask", ModuleKeyword = matCap2ndModule, FeatureName = "2nd matcap mask",
+                                 RequireToggle = true, ToggleProperty = "_UseMatCap2nd" },
                 new MaskSource { LilToonProperty = "_HairSpecularMask", ModuleKeyword = "HairSpecular", FeatureName = "hair specular mask" },
             };
 

@@ -66,8 +66,14 @@ namespace NonToonSwitcher
 
             try
             {
-                width = Mathf.Clamp(Mathf.NextPowerOfTwo(texture.width), 4, 4096);
-                height = Mathf.Clamp(Mathf.NextPowerOfTwo(texture.height), 4, 4096);
+                // 保持源贴图的**真实尺寸/长宽比**。以前这里用 NextPowerOfTwo 把尺寸向上取整
+                //（例如 2048x1943 → 2048x2048），RenderTexture 会把贴图拉伸，UV 全错位 ——
+                // 表现就是"衣服上的纹理没了 / 糊了"。只在超过上限时按比例缩小。
+                const int maxSize = 4096;
+                var longest = Mathf.Max(texture.width, texture.height);
+                var scale = longest > maxSize ? maxSize / (float)longest : 1f;
+                width = Mathf.Max(4, Mathf.RoundToInt(texture.width * scale));
+                height = Mathf.Max(4, Mathf.RoundToInt(texture.height * scale));
                 // 用 sRGB 的 RenderTexture + 非 linear 的临时贴图，拿到的才是"贴图里存的那份数值"（sRGB 编码），
                 // 和 isReadable 时 GetPixels() 的结果一致。
                 // 之前用 ReadWrite.Linear，RT 里存的是线性化后的值，两条路径结果不一样，

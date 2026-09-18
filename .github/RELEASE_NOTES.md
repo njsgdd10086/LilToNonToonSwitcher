@@ -1,44 +1,46 @@
-**LilToNonToon Switcher 1.1.13** —— 修掉「白金色服装的金饰变成灰色」（MatCap / 金属质感整片失效）。
+**LilToNonToon Switcher 1.1.14** —— 补上「第二层 MatCap」，并修掉模块开关不生效的问题（金饰/装饰终于能对上了）。
 
-## 三个叠加的原因
+## 一、第二层 MatCap 从来没转过
 
-**1. Shader Core 的模块开关要写「关键字」**
+lilToon 有**两层** MatCap：`_MatCapTex`（第一层）和 `_MatCap2ndTex`（第二层）。
+我们以前只转第一层 ✗ —— 所以走第二层的装饰（帽子的**羽毛 / 玫瑰**）转换后一直是灰的 ✗。
 
-NonToon 每个模块的开关带 `SCConstValue`，真正让模块生效的是材质上的关键字
-`<属性名大写>_<值>`（MatCap 就是 `_JP_LILXYZW_NONTOON_MATCAPS_ENABLE_1`）。
-我们以前只写了 `_Enable` 这个整数、没加关键字 ✗ ——
-表现就是「开关明明是勾着的，却要手动在 Inspector 里取消再勾一次才亮」✗。现在两者都写 ✓。
-
-**2. MatCap 混合模式理解反了**
-
-lilToon 的 `lilBlendColor`：
+NonToon 恰好有两个槽 ✓，现在：
 
 ```
-0 = Normal（直接用 matcap 颜色替换）   1 = Add   2 = Screen   3 = Multiply
+第一层（_MatCapTex，模式 0/1/2 → Add、3 → Multiply）→ 占一个槽
+第二层（_MatCap2ndTex）                              → 用剩下那个槽
 ```
 
-我们以前把 **0（Normal）**丢进了 Multiply ✗ —— 白布 × 金色 matcap 会算成发灰 ✗。
-现在 0/1/2 走 **MatCap (Add)**（叠加最接近「替换」），只有 3 才用 Multiply，
-并**清空另一个槽**（材质是复用的，上次留在里面的贴图会双重生效）。
+配套：`_MatCap2ndColor × _MatCap2ndBlend` 写进对应颜色 ✓、`_MatCap2ndBlendMask` 按第二层的槽位分配遮罩通道 ✓、
+`_UseMatCap2nd = 0` 时留空 ✓。
 
-**3. 遮罩通道与模块读取的通道不一致**
+## 二、模块开关「勾着但不生效」
 
-MatCap 的遮罩以前写死挂到 `MatCapMultiply` 模块 ✗，而贴图其实放在 `MatCapAdd` ✗ →
-数据烘进 R 通道、模块却读 A ✗（被乘成 ~0）。现在按实际槽位分配通道，
-写回模块并读回校验；同时去掉了第二层 MatCap 的无用遮罩（它没转、却会占通道并改模块通道）。
+NonToon 的模块开关带 `SCConstValue`，真正让它生效的是材质上的**关键字**
+`<属性名大写>_<值>`（MatCap 是 `_JP_LILXYZW_NONTOON_MATCAPS_ENABLE_1`）。
+我们以前只写 `_Enable` 整数 ✗ —— 表现就是「开关明明勾着，却要手动在 Inspector 里取消再勾一次才亮」✗。
+现在整数 + 关键字都写 ✓，并在转换后**强制重新导入材质**（模块状态需要这次刷新 ✓）。
 
-另外还修了：转换后**强制重新导入材质**（Shader Core 的模块状态需要刷新）、
-不需要烘焙时 `_BaseTexture` **指回源贴图**（不再残留旧烘焙图）、MatCap 颜色**总是写入**。
+## 三、顺带一起修的
 
-## 已知限制：金属反射
+- 遮罩通道按**实际使用的槽位**分配（以前写死 `MatCapMultiply` ✗ → 数据烘进 R、模块读 A ✗，被乘成 ~0），写完还读回校验 ✓
+- `_BumpMap` 现在**同时**接到 Details 模块的 `_Detail0NormalMap`（喂 `sd.N_detail`，Shade 模块真的用它算明暗 ✓），
+  并把四层 `Detail*Boost` 钉成 1 ✓（详情层会 `albedo *= detailTex * boost`，boost 不是 1 会整体改亮度 ✗）
+- 不需要烘焙时 `_BaseTexture` **指回源贴图** ✓（不再残留旧烘焙图 ✓）
+- 烘焙贴图保持**原长宽比** ✓；MatCap 颜色**总是写入** ✓
 
-lilToon 的 `_UseReflection`（`_Metallic` / `_Smoothness` / 环境反射）NonToon 没有对应能力，
-只能近似成一个高光 —— 所以「靠反射变金」的部分（帽子的**羽毛 / 玫瑰花**）转换后会比原版**偏灰** ✓。
-需要完全一致的话，这部分建议保留 lilToon 材质、或手动把 NonToon 的 Specular 调暖 + 降低 Roughness 近似。
+## 已知限制
+
+- **金属反射**：lilToon 的 `_UseReflection`（`_Metallic` / `_Smoothness` / 环境反射）NonToon 没有对应能力 ✗，
+  只能近似成高光 —— 「靠反射变金」的部分会比原版偏灰 ✓。
+- **织物质感 / 法线细节**：NonToon 是 toon 硬色阶 + 硬高光 ✗，法线扰动没有足够的输出通道 ✓ ——
+  主 `_NormalMap`、Details 的 `_Detail0NormalMap`、调高 `_NormalScale`、降低 `_Roughness` 都试过 ✓，
+  效果都不理想（降低 roughness 反而变塑料 ✗）。要完全一致只能自建 shader / 写模块 ✓。
 
 ## 升级后
 
-ALCOM 更新到 1.1.13 → **重新转换**受影响的材质（用了 MatCap / 金属感的那些）。
+ALCOM 更新到 1.1.14 → **重新转换**用了 MatCap（尤其是有第二层的）的材质。
 
 ## 安装 / 升级
 

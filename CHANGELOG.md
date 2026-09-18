@@ -1,5 +1,46 @@
 # 更新日志
 
+## [1.1.14] - 2026-09-17
+
+这一版是继续追「白金色服装的金饰 / 质感」时挖出来的一批问题。
+
+### 修复
+
+- **第二层 MatCap 从来没转过**：lilToon 的 `_MatCap2ndTex`（第二层 MatCap）完全没被映射 ✗ ——
+  帽子的**羽毛 / 玫瑰**这类走第二层的装饰，转换后就一直是灰的 ✗。
+  现在第一层按自己的混合模式占一个槽、**第二层用剩下那个槽** ✓（`_MatCap2ndTex` → `MatCapMultiply`、
+  `_MatCap2ndColor × _MatCap2ndBlend` → 对应颜色、`_MatCap2ndBlendMask` 按其槽位分配通道 ✓，
+  并用 `_UseMatCap2nd` 判断是否需要 ✓）。
+
+- **Shader Core 的模块开关要写「关键字」**：模块开关带 `SCConstValue`，真正让它生效的是材质上的关键字
+  `<属性名大写>_<值>`（例如 `_JP_LILXYZW_NONTOON_MATCAPS_ENABLE_1`）。以前只写 `_Enable` 整数 ✗，
+  表现就是「开关明明勾着、却要手动在 Inspector 里取消再勾一次才生效」✗。现在整数和关键字都写 ✓。
+
+- **没有打开 MatCap 模块**：源材质用 MatCap 时，现在会自动把 `matcaps_Enable` 设为 1 ✓。
+
+- **`_BumpMap` 现在同时接到 Details 模块的 `_Detail0NormalMap`**：NonToon 的主 `_NormalMap` 只影响
+  `sd.N`（toon 硬色阶下细节几乎看不出来 ✗），而 Details 的 `_Detail0NormalMap` 喂 `sd.N_detail`、
+  Shade 模块**真的**用它参与明暗 ✓ —— 这是法线细节唯一可能的出口 ✓。
+  同时把四层 `Detail*Boost` 钉成 1 ✓（Details 打开后 `albedo *= detailTex * boost`，
+  `_DetailMask` 默认全白，boost 不是 1 会整体改亮度 ✗）。
+
+- **遮罩通道按「实际使用的槽位」分配**（MatCap 以前写死 `MatCapMultiply` ✗，而贴图放在 `MatCapAdd` ✗
+  → 数据烘进 R、模块读 A ✗，被乘成 ~0）+ 通道写回后**读回校验** ✓。
+
+- **转换后强制重新导入材质**：Shader Core 的模块状态要在材质重新导入后刷新 ✓，
+  否则会出现「转换完了但模块没生效」✓。
+
+- **不需要烘焙时把 `_BaseTexture` 指回源贴图**（不再残留上一次转换的旧烘焙图 ✓）、
+  **RenderTexture 兜底路径保持原贴图长宽比** ✓、**MatCap 颜色总是写入** ✓。
+
+### 已知限制（写进 README）
+
+- **金属反射**：lilToon 的 `_UseReflection`（`_Metallic` / `_Smoothness` / 环境反射）NonToon 没有对应能力 ✗，
+  只能近似成一个高光 —— 「靠反射变金」的部分会比原版偏灰 ✓。
+- **织物质感 / 法线细节**：NonToon 的着色是 toon 硬色阶 + 硬高光 ✗，法线扰动没有足够的输出通道 ✓ ——
+  主 `_NormalMap`、Details 的 `_Detail0NormalMap`、调高 `_NormalScale`、降低 `_Roughness` 都试过 ✓，
+  效果都不理想（降低 roughness 还会变成塑料光泽 ✗）。需要完全一致只能自建 shader / 写模块 ✓。
+
 ## [1.1.13] - 2026-09-17
 
 这一版主要修 **MatCap（金属质感）整片失效** —— 顺着「白金色服装的金饰变成灰的」一路查到三个叠加的原因。
