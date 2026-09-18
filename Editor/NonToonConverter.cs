@@ -1172,6 +1172,23 @@ namespace NonToonSwitcher
         {
             if (target == null || !ShaderUtility.HasProperty(target, "_OutlineWidth")) return;
 
+            // lilToon 有没有描边是**靠 shader 变体**区分的（`Hidden/lilToonOutline` 有、`Hidden/lilToon` 没有，
+            // `Hidden/lilToonMulti` / `...Refraction` 这类也没有），而 `_OutlineWidth` 在没描边的变体里只是
+            // 作者调过的残留值（0.08 之类）。照搬它就会给这些材质凭空加一圈描边 —— 透明/特效层上这圈壳
+            // 还是不透明的（blend 1/0），VR 里贴脸看就像有东西挡着视野。
+            var shaderName = source != null && source.shader != null ? source.shader.name : "";
+            if (shaderName.IndexOf("Outline", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                var stale = target.GetFloat("_OutlineWidth");
+                if (stale > 0f)
+                {
+                    ShaderUtility.SetFloatValue(target, "_OutlineWidth", 0f);
+                    log.Mapped("描边（源 shader「" + shaderName + "」没有描边变体，_OutlineWidth=" + stale.ToString("0.####") + " 是残留值）",
+                        "_OutlineWidth = 0（不加描边）");
+                }
+                return;
+            }
+
             var manual = NonToonSwitcherSettings.instance.OutlineWidthFactor;
             var factor = manual * (outlineScale > 0f ? outlineScale : 1f);
             if (Mathf.Approximately(factor, 1f)) return;

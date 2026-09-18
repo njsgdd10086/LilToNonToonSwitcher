@@ -2,6 +2,29 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.11] - 2026-09-17
+
+### 修复
+
+- **凭空多出的描边**：lilToon「有没有描边」是**靠 shader 变体**区分的 ——
+  `Hidden/lilToonOutline` / `Hidden/lilToonTransparentOutline` 有描边，
+  而 `Hidden/lilToon`、`_lil/lilToonMulti`、`Hidden/lilToonMultiRefraction` 这些**没有**。
+  这些变体里 `_OutlineWidth` 只是作者调过的**残留值**（常见 0.08），我们之前无条件照搬，
+  于是给它们凭空加了一圈描边（还要再乘对象缩放）。
+
+  现在按 shader 名判断：变体名里不含 `Outline` 时把描边宽度写成 0，日志写明原因：
+
+  ```
+  · 描边（源 shader「Hidden/lilToonMultiRefraction」没有描边变体，_OutlineWidth=0.08 是残留值）  ->  _OutlineWidth = 0（不加描边）
+  ```
+
+  **这一条很可能就是「切到 NonToon 后视角被东西挡住」的原因**：透明 / 特效层（花瓣、纸片、装饰）
+  多出的那圈描边壳是**不透明**的（混合 `1/0`），贴在头脸附近时看起来就像有东西糊住视野。
+
+- 折射材质（`Hidden/lilToonMultiRefraction`）现在会明确提示：NonToon 没有折射，
+  材质会按普通**不透明**层渲染（源材质的混合本来就是 `One / Zero`，所以它原本也是不透明层，
+  只是靠折射扭曲看起来"透"）。这类材质建议保持 lilToon 或手动调。
+
 ## [1.1.10] - 2026-09-17
 
 ### 修复

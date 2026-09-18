@@ -1,60 +1,42 @@
-**LilToNonToon Switcher 1.1.9** —— 跟另一个 lilToon→NonToon 转换插件**逐属性对拍**（16 对材质）后找出并修掉的 4 个问题。
+**LilToNonToon Switcher 1.1.11** —— 修掉「凭空多出的描边」（很可能就是切到 NonToon 后视角被东西挡住的原因）。
 
-## 一、阴影 / 边缘阴影的渐变索引串位（最明显）
+## 问题：没有描边的材质被加上了一圈描边
 
-源材质只用了「边缘阴影」没用「阴影」时（`_UseShadow = 0`、`_UseRimShade = 1`），
-烘焙出来只有一条渐变、它的切片索引是 `0` —— 而我们按"位置"把第一个切片当成 **Shade** 的索引：
+lilToon「有没有描边」是**靠 shader 变体**区分的：
 
-```
-Shade 模块   → 采到了边缘阴影的渐变 ✗
-RimShade 模块 → 被关掉（-1）✗
-```
+| shader | 有没有描边 |
+| --- | --- |
+| Hidden/lilToonOutline、Hidden/lilToonTransparentOutline | 有 |
+| Hidden/lilToon、_lil/lilToonMulti、Hidden/lilToonMultiRefraction … | **没有** |
 
-现在烘焙时按模块分别记索引，实测：
+没有描边的变体里，_OutlineWidth 只是作者调过的**残留值**（这些材质里是 0.08）。
+我们之前无条件照搬它，于是给花瓣、纸片、装饰这类材质凭空加了一圈描边（再乘上对象缩放）。
 
-```
-M_HairOutline:  源 _UseShadow=0 _UseRimShade=1  →  ShadeIdx=-1  RimShadeIdx=0  ✓
-```
+**为什么会在 VR 里挡住视角**：这圈描边壳是**不透明**的（混合 One / Zero），
+而它所在的透明/特效层往往就在头脸附近 —— 切到 NonToon 之后它突然出现，看起来就像有东西糊住视野。
 
-## 二、凭空多出的高光
+现在按 shader 名判断，不含 Outline 的变体写 _OutlineWidth = 0：
 
-源材质 `_UseReflection = 0`（lilToon 根本不画高光）时，我们直接跳过映射，
-把 NonToon 的默认 `_Roughness = 0.5` 留在那里 —— 等于**多加了一个高光**。
-现在这种情况写 `_Roughness = 1`（无高光）。受影响的是绝大多数材质
-（`M_Alpha_1/2`、`M_Bandage`、`M_Body_*`、`M_Hair*`、`M_Eye`、`M_Shoes` …）。
+`
+· 描边（源 shader「Hidden/lilToonMultiRefraction」没有描边变体，_OutlineWidth=0.08 是残留值）  ->  _OutlineWidth = 0（不加描边）
+`
 
-## 三、法线强度照搬了无效值
+有描边的变体不受影响（M_Hair 0.072、Chocolat_Costume 0.07 都照旧）。
 
-lilToon 的 `_BumpScale` 在**没挂法线贴图**时完全不参与渲染，但作者往往调过（实测有 `8.17`）。
-照搬到 NonToon 会把默认白贴图当法线放大 —— 现在没挂贴图时写 `_NormalScale = 0`。
+## 另外：折射材质
 
-## 四、alpha 通道的混合系数被误解
-
-1.1.7 加预乘 alpha 换算时，把 `_SrcBlendAlpha / _DstBlendAlpha` 也一起换成了 `SrcAlpha` ✗。
-但 lilToon 预乘的是**颜色**通道，alpha 通道并没有预乘（写成 SrcAlpha 会让目标 alpha 变成 `a²`），
-现在只换算 `_SrcBlend`。
-
-## 顺带确认：这些差异是**对方**的 bug
-
-对拍时逐项回源材质核对过，以下不是我们的问题：
-
-| 项目 | 源材质 | 我们 | 另一个插件 |
-| --- | --- | --- | --- |
-| `_OutlineWidth`（6 个材质） | 0.112 | 0.112 ✓ | **0**（描边整个丢了） |
-| `_OutlineColor`（5 个材质） | (0.783,0.544,0.513) | 同源 ✓ | (0.6,0.45,0.55)（NonToon 默认色） |
-| Stencil（8 个材质） | `_StencilRef=146` | 照搬 ✓ | **全部清零**（lilToon 确实用 stencil 做遮罩） |
-| `M_HairShadow` 混合 | `Zero / SrcColor` | 0/3 ✓ | 5/10（正片叠底变普通 alpha） |
-| `_OutlineVertexR2Width = 2` | 顶点色当描边方向 | `_OutlineFromVertexColor=1` ✓ | 0 |
-| `_MatCapColor` | 源值 | 源值 ✓ | 默认 (1,1,1,1) |
+Hidden/lilToonMultiRefraction（折射）NonToon 没有对应实现，会按普通**不透明**层渲染 ——
+注意这类材质的混合本来就是 One / Zero（不透明），它原本是靠**折射扭曲**看起来透的。
+转换日志里会明确提示；这类材质建议保持 lilToon、或转换后手动调成半透明。
 
 ## 升级后
 
-ALCOM 更新到 1.1.9 → **重新转换**全部材质（这一版的修复都是转换期写入的）。
+ALCOM 更新到 1.1.11 → **重新转换**材质（描边宽度是转换期写入的）。
 
 ## 安装 / 升级
 
 VCC / ALCOM 仓库地址（总仓库，本插件与 NonToon Light Limit 都在这份索引里）：
 
-```
+`
 https://njsgdd10086.github.io/vpm-listing/index.json
-```
+`
