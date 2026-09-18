@@ -1,37 +1,16 @@
-**LilToNonToon Switcher 1.1.11** —— 修掉「凭空多出的描边」（很可能就是切到 NonToon 后视角被东西挡住的原因）。
+**LilToNonToon Switcher 1.1.12** —— 加了版本号显示与更新检查。
 
-## 问题：没有描边的材质被加上了一圈描边
+## 新增
 
-lilToon「有没有描边」是**靠 shader 变体**区分的：
+- 菜单 Tools > LilToNonToon Switcher > 关于与更新检查…
+  显示当前版本 vX.Y.Z、索引里的最新版本，并提供「检查更新 / 打开发布页」。
+- 菜单 Tools > LilToNonToon Switcher > 检查更新 —— 直接检查，有新版会弹窗。
+- 设置窗口顶部显示「版本 vX.Y.Z」+「检查更新 / 发布页」按钮。
+- 编辑器启动后**每天自动检查一次**（失败静默；发现新版只在 Console 提示一行）。
 
-| shader | 有没有描边 |
-| --- | --- |
-| Hidden/lilToonOutline、Hidden/lilToonTransparentOutline | 有 |
-| Hidden/lilToon、_lil/lilToonMulti、Hidden/lilToonMultiRefraction … | **没有** |
-
-没有描边的变体里，_OutlineWidth 只是作者调过的**残留值**（这些材质里是 0.08）。
-我们之前无条件照搬它，于是给花瓣、纸片、装饰这类材质凭空加了一圈描边（再乘上对象缩放）。
-
-**为什么会在 VR 里挡住视角**：这圈描边壳是**不透明**的（混合 One / Zero），
-而它所在的透明/特效层往往就在头脸附近 —— 切到 NonToon 之后它突然出现，看起来就像有东西糊住视野。
-
-现在按 shader 名判断，不含 Outline 的变体写 _OutlineWidth = 0：
-
-`
-· 描边（源 shader「Hidden/lilToonMultiRefraction」没有描边变体，_OutlineWidth=0.08 是残留值）  ->  _OutlineWidth = 0（不加描边）
-`
-
-有描边的变体不受影响（M_Hair 0.072、Chocolat_Costume 0.07 都照旧）。
-
-## 另外：折射材质
-
-Hidden/lilToonMultiRefraction（折射）NonToon 没有对应实现，会按普通**不透明**层渲染 ——
-注意这类材质的混合本来就是 One / Zero（不透明），它原本是靠**折射扭曲**看起来透的。
-转换日志里会明确提示；这类材质建议保持 lilToon、或转换后手动调成半透明。
-
-## 升级后
-
-ALCOM 更新到 1.1.11 → **重新转换**材质（描边宽度是转换期写入的）。
+检查读的是本仓库的 VPM 索引（就是你在 VCC / ALCOM 里加的那个地址），不用额外设置。
+说明一下：Unity 的菜单名是编译期固定的（[MenuItem]），所以版本号没法直接写进菜单文字 ——
+放在了菜单打开的对话框和设置窗口里。
 
 ## 安装 / 升级
 

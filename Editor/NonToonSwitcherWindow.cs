@@ -36,6 +36,15 @@ namespace NonToonSwitcher
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
             EditorGUILayout.LabelField("LilToNonToon Switcher", EditorStyles.boldLabel);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("版本 v" + UpdateChecker.InstalledVersion, EditorStyles.miniLabel, GUILayout.Width(120f));
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("检查更新", EditorStyles.miniButton, GUILayout.Width(80f)))
+                    UpdateChecker.Check(true);
+                if (GUILayout.Button("发布页", EditorStyles.miniButton, GUILayout.Width(60f)))
+                    Application.OpenURL(UpdateChecker.ReleasesUrl);
+            }
             EditorGUILayout.HelpBox(
                 "在 Hierarchy 里选中对象 → 右键 → LilToNonToon → 「将选中对象转换为 NonToon」。\n\n" +
                 "· 把选中对象里的 lilToon 材质转成 NonToon，保存到指定文件夹\n" +

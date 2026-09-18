@@ -2,6 +2,22 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.12] - 2026-09-17
+
+### 新增
+
+- **版本号与更新检查**：
+
+  - 菜单 Tools > LilToNonToon Switcher > 关于与更新检查…：显示当前版本、索引里的最新版本，并提供
+    「检查更新 / 打开发布页」两个按钮；
+  - 菜单 Tools > LilToNonToon Switcher > 检查更新：直接检查并在有新版时弹窗；
+  - 设置窗口顶部显示「版本 vX.Y.Z」+「检查更新 / 发布页」按钮；
+  - 编辑器启动后**每天自动检查一次**（EditorPrefs 记时间戳，失败静默，发现新版只在 Console 提示一行）。
+
+  检查走的是本仓库的 VPM 索引（https://njsgdd10086.github.io/vpm-listing/index.json），
+  不需要额外配置。注：Unity 的菜单名是**静态**的（[MenuItem] 编译期就固定），所以版本号放在
+  菜单打开的对话框和设置窗口里，没法直接写进菜单文字。
+
 ## [1.1.11] - 2026-09-17
 
 ### 修复

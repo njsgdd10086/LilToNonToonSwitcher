@@ -1,6 +1,6 @@
 {
     "name": "com.nontoon.switcher",
-    "version": "1.1.11",
+    "version": "1.1.12",
     "displayName": "LilToNonToon Switcher",
     "description": "右键选中对象，把其中的 lilToon 材质一键转换为 NonToon（保存为 <名称>_nontoon.mat），并自动创建 Modular Avatar 的 MA Material Setter + 菜单开关，实现一键切换 shader。",
     "unity": "2022.3",
