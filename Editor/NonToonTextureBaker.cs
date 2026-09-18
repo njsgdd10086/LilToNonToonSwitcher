@@ -131,6 +131,17 @@ namespace NonToonSwitcher
             var hsvg = ShaderUtility.HasProperty(lilToonMaterial, "_MainTexHSVG")
                 ? lilToonMaterial.GetVector("_MainTexHSVG")
                 : new Vector4(0f, 1f, 1f, 1f);
+            // lilToon 的色彩校正是被 shader keyword「EFFECT_HUE_VARIATION」门控的：
+            // 没这个关键字时 shader 根本不读 _MainTexHSVG，材质里那串值可能只是残留
+            //（实测有一套衣服存着 (0,0,1.4,0.7) —— 饱和度 0，照烘会把整件洗成灰度，
+            //  而 lilToon 渲染出来是金色的）。所以只在关键字真的开着时才烘。
+            if (!IsKeywordOn(lilToonMaterial, "EFFECT_HUE_VARIATION") &&
+                (hsvg.x != 0f || hsvg.y != 1f || hsvg.z != 1f || hsvg.w != 1f))
+            {
+                log.Mapped("_MainTexHSVG " + hsvg.ToString("0.###") + "（源材质没开 EFFECT_HUE_VARIATION 关键字，lilToon 不会应用它）",
+                    "不烘焙色彩校正，保留原贴图颜色");
+                hsvg = new Vector4(0f, 1f, 1f, 1f);
+            }
             var gradationStrength = ShaderUtility.HasProperty(lilToonMaterial, "_MainGradationStrength")
                 ? lilToonMaterial.GetFloat("_MainGradationStrength")
                 : 0f;
@@ -389,6 +400,32 @@ namespace NonToonSwitcher
         {
             var wrapped = hue - Mathf.Floor(hue);
             return Mathf.Clamp01(Mathf.Abs(wrapped * 6f - 3f) - 1f);
+        }
+
+        /// <summary>
+        /// 材质上有没有开某个 shader keyword（lilToon 的很多特性是靠关键字门控的，
+        /// 关键字没开时那些属性值根本不参与渲染）。
+        /// </summary>
+        private static bool IsKeywordOn(Material material, string keyword)
+        {
+            try
+            {
+                if (material.IsKeywordEnabled(keyword)) return true;
+            }
+            catch (Exception)
+            {
+                // 老版本 Unity 没有这个方法时忽略，退回下面按字符串找
+            }
+
+            var shader = material.shader;
+            if (shader == null) return false;
+            var path = AssetDatabase.GetAssetPath(shader);
+            if (string.IsNullOrEmpty(path)) return false;
+            foreach (var line in File.ReadAllLines(path))
+                if (line.IndexOf(keyword, StringComparison.Ordinal) >= 0 &&
+                    line.IndexOf("#pragma shader_feature", StringComparison.Ordinal) >= 0)
+                    return true;
+            return false;
         }
 
         /// <summary>lilToon 的 float3 lilGradationMap(float3 col, TEXTURE2D(gradationMap), float strength) 的 CPU 版本。</summary>

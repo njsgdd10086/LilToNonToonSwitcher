@@ -229,6 +229,19 @@ namespace NonToonSwitcher
                     if (ShaderUtility.HasProperty(target, "_BaseColor")) target.SetColor("_BaseColor", Color.white);
                     log.Unconverted.Clear();
                 }
+                else if (ShaderUtility.HasProperty(target, "_BaseTexture"))
+                {
+                    // 这次不需要烘焙（例如源材质那条色彩校正其实没启用）——那就要把 _BaseTexture 指回
+                    // 原贴图，否则**上一次转换留下的旧烘焙图**会继续挂着（实测有一件衣服因此一直是灰的）。
+                    var original = ShaderUtility.HasProperty(source, "_MainTex")
+                        ? source.GetTexture("_MainTex")
+                        : null;
+                    if (target.GetTexture("_BaseTexture") != original)
+                    {
+                        target.SetTexture("_BaseTexture", original);
+                        log.Mapped("不需要烘焙", "_BaseTexture 指回源贴图 " + (original != null ? original.name : "(空)"));
+                    }
+                }
             }
 
             if (log.BakeSharedMask) NonToonMaskBuilder.Bake(source, target, log.Folder, log);
