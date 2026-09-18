@@ -246,34 +246,65 @@ namespace NonToonSwitcher
             }, "边缘光边界/模糊/菲涅尔幂 -> 边缘光范围");
 
             // ----- matcap -----
+            // lilToon 的 lilBlendColor：0 = Normal（**直接用 matcap 颜色替换**）、1 = Add、2 = Screen、3 = Multiply。
+            // NonToon 只有 Multiply / Add 两个槽，所以 0/1/2 都放到 Add（叠加最接近"替换"），只有真正的
+            // Multiply(3) 才用 Multiply 槽 —— 之前 0 被当成 Multiply，白布料 × 金色 matcap 会算成发灰，
+            // 金饰就整片没了。
             MapFunc("_MatCapTex", ShaderUtility.NtMatCapsPrefix + "MatCapMultiply", (src, dst, log) =>
             {
                 var multiply = ShaderUtility.NtMatCapsPrefix + "MatCapMultiply";
                 var add = ShaderUtility.NtMatCapsPrefix + "MatCapAdd";
                 var texture = src.GetTexture("_MatCapTex");
                 if (texture == null) return;
-                var blendMode = Mathf.RoundToInt(src.GetFloat("_MatCapBlendMode"));
-                // lilToon: 0 normal, 1 add, 2 screen, 3 multiply, 4 overlay / 2nd matcap is always an overlay.
-                var to = blendMode == 1 || blendMode == 2 ? add : multiply;
-                if (!ShaderUtility.HasProperty(dst, to)) { log.Unsupported("MatCap：需要安装 NonToon 的 MatCaps 模块。"); return; }
+                var blendMode = ShaderUtility.HasProperty(src, "_MatCapBlendMode")
+                    ? Mathf.RoundToInt(src.GetFloat("_MatCapBlendMode"))
+                    : 3;
+                var to = blendMode == 3 ? multiply : add;
+                if (!ShaderUtility.HasProperty(dst, to))
+                {
+                    log.Unsupported("MatCap：需要安装 NonToon 的 MatCaps 模块。");
+                    return;
+                }
                 ShaderUtility.SetTextureValue(dst, to, texture);
-                if (ShaderUtility.HasProperty(src, "_MatCapBlend"))
-                    ShaderUtility.SetFloatValue(dst, to == add ? ShaderUtility.NtMatCapsPrefix + "MatCapAddDetail" : ShaderUtility.NtMatCapsPrefix + "MatCapMultiplyDetail",
-                        Mathf.Clamp01(1f - src.GetFloat("_MatCapBlend")));
-                log.Mapped("_MatCapTex", to);
+                // 另一个槽要清空：材质是复用的，上一次转换留在里面的贴图会一起生效（效果翻倍）。
+                var other = to == add ? multiply : add;
+                if (ShaderUtility.HasProperty(dst, other)) ShaderUtility.SetTextureValue(dst, other, null);
+
+                // NonToon 的 MatCaps 模块有个总开关 `_Enable`，**默认是 0（关闭）** ——
+                // 只挂贴图不开开关的话模块完全不生效（金饰整片消失就是这么来的）。
+                var enable = ShaderUtility.NtMatCapsPrefix + "Enable";
+                if (ShaderUtility.HasProperty(dst, enable))
+                {
+                    if (ShaderUtility.ReadSerializedInt(dst, enable, 0) == 0)
+                    {
+                        ShaderUtility.SetIntPersistent(dst, enable, 1);
+                        log.Mapped("_UseMatCap", enable + " = 1（打开 MatCap 模块）");
+                    }
+                    // Shader Core 的 SCConstValue 开关实际是给材质加一个关键字 `<属性名大写>_<值>`
+                    // （在 Inspector 里点一下就是这个动作）。只写整数、不加关键字的话模块依然不生效，
+                    // 表现为"开关明明是勾着的、但要手动再点一次才亮"。
+                    var key = enable.ToUpperInvariant();
+                    var value = ShaderUtility.ReadSerializedInt(dst, enable, 1);
+                    dst.EnableKeyword(key + "_" + value);
+                    dst.DisableKeyword(key + "_" + (value == 0 ? 1 : 0));
+                }
+                log.Mapped("_MatCapTex（lilToon 混合模式 " + blendMode + "）", to +
+                    (to == add ? "（NonToon 没有 Normal/Screen，用叠加近似）" : ""));
             }, "MatCap 贴图：需要安装 NonToon 的 MatCaps 模块。");
 
             MapFunc("_MatCapColor", ShaderUtility.NtMatCapsPrefix + "MatCapMultiplyColor", (src, dst, log) =>
             {
                 var multiplyColor = ShaderUtility.NtMatCapsPrefix + "MatCapMultiplyColor";
                 var addColor = ShaderUtility.NtMatCapsPrefix + "MatCapAddColor";
-                var color = src.GetColor("_MatCapColor");
-                if (color == Color.white) return;
-                var blendMode = Mathf.RoundToInt(src.GetFloat("_MatCapBlendMode"));
-                var to = (blendMode == 1 || blendMode == 2) && ShaderUtility.HasProperty(dst, addColor) ? addColor : multiplyColor;
+                var color = ShaderUtility.HasProperty(src, "_MatCapColor") ? src.GetColor("_MatCapColor") : Color.white;
+                // 总是写：材质是复用的，上一次转换留下的旧颜色会一直生效（如果是黑的，叠加等于没加）。
+                var blendMode = ShaderUtility.HasProperty(src, "_MatCapBlendMode")
+                    ? Mathf.RoundToInt(src.GetFloat("_MatCapBlendMode"))
+                    : 3;
+                var to = blendMode != 3 && ShaderUtility.HasProperty(dst, addColor) ? addColor : multiplyColor;
                 if (!ShaderUtility.HasProperty(dst, to)) return;
                 dst.SetColor(to, color);
-                log.Mapped("_MatCapColor", to);
+                log.Mapped("_MatCapColor " + color.ToString("0.###"), to);
             }, "MatCap 颜色：需要安装 NonToon 的 MatCaps 模块。");
 
             // ----- specular / reflection -----

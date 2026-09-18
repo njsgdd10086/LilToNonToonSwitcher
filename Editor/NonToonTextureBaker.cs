@@ -131,17 +131,10 @@ namespace NonToonSwitcher
             var hsvg = ShaderUtility.HasProperty(lilToonMaterial, "_MainTexHSVG")
                 ? lilToonMaterial.GetVector("_MainTexHSVG")
                 : new Vector4(0f, 1f, 1f, 1f);
-            // lilToon 的色彩校正是被 shader keyword「EFFECT_HUE_VARIATION」门控的：
-            // 没这个关键字时 shader 根本不读 _MainTexHSVG，材质里那串值可能只是残留
-            //（实测有一套衣服存着 (0,0,1.4,0.7) —— 饱和度 0，照烘会把整件洗成灰度，
-            //  而 lilToon 渲染出来是金色的）。所以只在关键字真的开着时才烘。
-            if (!IsKeywordOn(lilToonMaterial, "EFFECT_HUE_VARIATION") &&
-                (hsvg.x != 0f || hsvg.y != 1f || hsvg.z != 1f || hsvg.w != 1f))
-            {
-                log.Mapped("_MainTexHSVG " + hsvg.ToString("0.###") + "（源材质没开 EFFECT_HUE_VARIATION 关键字，lilToon 不会应用它）",
-                    "不烘焙色彩校正，保留原贴图颜色");
-                hsvg = new Vector4(0f, 1f, 1f, 1f);
-            }
+            // 注意：不要用 `EFFECT_HUE_VARIATION` 关键字来判断"要不要烘色彩校正"。
+            // 实测（lilToon 2.x + `Hidden/lilToonTwoPassTransparent`）关键字是关的，
+            // 但 lilToon 渲染时**确实**应用了 `_MainTexHSVG`（粉色布料被烤成白色）——
+            // 按关键字跳过会把整件弄成原来的粉紫色。判定方式保持"值 ≠ 默认就烘"。
             var gradationStrength = ShaderUtility.HasProperty(lilToonMaterial, "_MainGradationStrength")
                 ? lilToonMaterial.GetFloat("_MainGradationStrength")
                 : 0f;

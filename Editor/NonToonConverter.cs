@@ -253,6 +253,13 @@ namespace NonToonSwitcher
             ShaderUtility.PersistIntegers(target);
             AssetDatabase.SaveAssets();
 
+            // Shader Core 的模块开关（`_Enable`，带 SCConstValue）光写文件不够：运行时材质要重新导入一次
+            // 才会刷新 shader 变体状态，否则模块看起来"开了但没生效"（实测：手动在 Inspector 里取消再勾一下
+            // 才会亮起来）。所以这里对写过的材质做一次强制重新导入。
+            var materialPath = AssetDatabase.GetAssetPath(target);
+            if (!string.IsNullOrEmpty(materialPath))
+                AssetDatabase.ImportAsset(materialPath, ImportAssetOptions.ForceUpdate);
+
             // Re-fetch: importing the baked textures can replace the in-memory object behind our back.
             var assetPath = AssetDatabase.GetAssetPath(target);
             log.Destination = string.IsNullOrEmpty(assetPath)

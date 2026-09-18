@@ -34,6 +34,14 @@ namespace NonToonSwitcher
                 return;
             }
 
+            // MatCap 的遮罩要挂到**实际使用的那个槽**上：lilToon 的混合模式 0/1/2（Normal/Add/Screen）
+            // 我们近似成 NonToon 的 MatCapAdd，只有 3(Multiply) 才用 MatCapMultiply。
+            // 之前这里写死 MatCapMultiply，于是遮罩数据分到了 R 通道、而 Add 模块还在读 A，叠加的金色被乘成 ~0。
+            var matCapModule = "MatCapAdd";
+            if (ShaderUtility.HasProperty(lilToonMaterial, "_MatCapBlendMode") &&
+                Mathf.RoundToInt(lilToonMaterial.GetFloat("_MatCapBlendMode")) == 3)
+                matCapModule = "MatCapMultiply";
+
             var sources = new List<MaskSource>
             {
                 new MaskSource { LilToonProperty = "_AlphaMask", ModuleKeyword = "Cutoff", FeatureName = "alpha mask" },
@@ -41,8 +49,10 @@ namespace NonToonSwitcher
                                  RequireToggle = true, ToggleProperty = "_UseBacklight" },
                 new MaskSource { LilToonProperty = "_RimColorTex", ModuleKeyword = "RimLight", FeatureName = "rim light mask" },
                 new MaskSource { LilToonProperty = "_ReflectionColorTex", ModuleKeyword = "Specular", FeatureName = "specular mask" },
-                new MaskSource { LilToonProperty = "_MatCapBlendMask", ModuleKeyword = "MatCapMultiply", FeatureName = "matcap mask" },
-                new MaskSource { LilToonProperty = "_MatCap2ndBlendMask", ModuleKeyword = "MatCapAdd", FeatureName = "2nd matcap mask" },
+                new MaskSource { LilToonProperty = "_MatCapBlendMask", ModuleKeyword = matCapModule, FeatureName = "matcap mask" },
+                // 第二层 MatCap 的贴图（_MatCap2ndTex）我们没有转，所以它的遮罩也不要烘 ——
+                // 否则它会占掉一个通道、还把 MatCapAdd 模块的 Mask Channel 改到自己那个通道上，
+                // 结果第一层的金色遮罩被别的通道乘掉（实测就是这个：Add 槽读 G，而金色遮罩在 R）。
                 new MaskSource { LilToonProperty = "_HairSpecularMask", ModuleKeyword = "HairSpecular", FeatureName = "hair specular mask" },
             };
 
@@ -51,6 +61,10 @@ namespace NonToonSwitcher
             var height = 0;
             var used = new List<string>();
             var channelOwner = new string[4];
+            // 通道分配先记下来，等遮罩贴图写完之后**统一**写入再统一保存 ——
+            // 边烘边写会写不进 .mat（实测：MatCap 的遮罩被分到了 R 通道，但模块的 Mask Channel
+            // 仍然停在默认的 A，于是 MatCap 被乘成 ~0，金色装饰整片消失）。
+            var assignments = new List<KeyValuePair<string, int>>();
 
             foreach (var source in sources)
             {
@@ -95,7 +109,7 @@ namespace NonToonSwitcher
 
                 if (channelProperty != null && channel != preferred)
                 {
-                    ShaderUtility.SetIntPersistent(nonToonMaterial, channelProperty, channel);
+                    assignments.Add(new KeyValuePair<string, int>(channelProperty, channel));
                     log.Mapped(source.FeatureName,
                         "写入共享遮罩的 " + "RGBA"[channel] + " 通道（模块的 Mask Channel 也随之改为 " + "RGBA"[channel] + "）");
                 }
@@ -161,6 +175,24 @@ namespace NonToonSwitcher
 
             nonToonMaterial.SetTexture("_SharedMask", asset);
             log.Mapped("lilToon 遮罩（" + string.Join("、", used) + "）", "_SharedMask");
+
+            // 统一写通道 + 读回校验（写不进就明确报警，免得又变成"金饰消失"这种哑巴问题）
+            if (assignments.Count > 0)
+            {
+                foreach (var pair in assignments)
+                    ShaderUtility.SetIntPersistent(nonToonMaterial, pair.Key, pair.Value);
+                EditorUtility.SetDirty(nonToonMaterial);
+                AssetDatabase.SaveAssets();
+
+                foreach (var pair in assignments)
+                {
+                    var readBack = ShaderUtility.ReadSerializedInt(nonToonMaterial, pair.Key, int.MinValue);
+                    if (readBack != pair.Value)
+                        log.Warn("共享遮罩通道没能写进材质：" + pair.Key + " 期望 " + pair.Value +
+                                 "（" + "RGBA"[pair.Value] + "）、实际 " + readBack +
+                                 "。请在转换后的材质上手动把该模块的 Mask Channel 改成 " + "RGBA"[pair.Value] + "。");
+                }
+            }
         }
 
         private static void WriteTexture(Color[] pixels, int width, int height, string path)
@@ -199,12 +231,21 @@ namespace NonToonSwitcher
         {
             if (shader == null) return null;
             var count = shader.GetPropertyCount();
+            // 先按"名字里有模块关键字 + 以 MaskChannel 结尾"找 —— 不要再额外要求描述文本里有
+            // "Mask Channel"：Shader Core 的属性描述不一定是那个字符串，之前就是因为这条把匹配挡掉，
+            // 结果通道被当成 0(R) 而模块仍读 A，MatCap 被乘成 ~0（金饰整片消失）。
+            for (var i = 0; i < count; i++)
+            {
+                var name = shader.GetPropertyName(i);
+                if (!name.EndsWith("MaskChannel", StringComparison.OrdinalIgnoreCase)) continue;
+                if (name.IndexOf(moduleKeyword, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                return name;
+            }
             for (var i = 0; i < count; i++)
             {
                 var name = shader.GetPropertyName(i);
                 if (name.IndexOf("MaskChannel", StringComparison.OrdinalIgnoreCase) < 0) continue;
                 if (name.IndexOf(moduleKeyword, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (shader.GetPropertyDescription(i).IndexOf("Mask Channel", StringComparison.OrdinalIgnoreCase) < 0) continue;
                 return name;
             }
             // Fall back to the main module naming used by NonToon itself.

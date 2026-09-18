@@ -1,5 +1,43 @@
 # 更新日志
 
+## [1.1.13] - 2026-09-17
+
+这一版主要修 **MatCap（金属质感）整片失效** —— 顺着「白金色服装的金饰变成灰的」一路查到三个叠加的原因。
+
+### 修复
+
+- **Shader Core 的模块开关要写关键字，不只是写 `_Enable`**：NonToon 每个模块的开关带
+  `SCConstValue`，真正让模块生效的是材质上的关键字 **`<属性名大写>_<值>`**（例如
+  `_JP_LILXYZW_NONTOON_MATCAPS_ENABLE_1`）。我们以前只写整数、不加关键字 ✗，
+  表现就是「开关明明是勾着的、却要手动在 Inspector 里取消再勾一次才生效」✗。现在两者都写 ✓。
+
+- **MatCap 混合模式理解反了**：lilToon 的 `lilBlendColor` 是
+  `0 = Normal`（用 matcap 颜色替换）/ `1 = Add` / `2 = Screen` / `3 = Multiply` ——
+  我们以前把 0 丢进 Multiply ✗，白布 × 金色 matcap 会算成发灰 ✗。现在 0/1/2 走 **`MatCapAdd`**
+  （叠加最接近「替换」）、只有 3 才用 Multiply，并**清空另一个槽**（复用材质时旧贴图会双重生效）。
+
+- **遮罩通道按「实际使用的槽」分配**：MatCap 的遮罩以前写死挂到 `MatCapMultiply` 模块 ✗，
+  而贴图其实放在 `MatCapAdd` ✗ → 数据烘进 R 通道、模块却读 A ✗（被乘成 ~0）。
+  现在按实际槽位分配通道，并写回模块 + 读回校验 ✓。
+
+- **去掉第二层 MatCap 的无用遮罩**：`_MatCap2ndBlendMask` 会占掉一个通道、还把模块的
+  Mask Channel 改到自己那个通道上 ✗，导致第一层的金色遮罩被别的通道乘掉 ✓
+  （第二层的贴图 `_MatCap2ndTex` 我们本来就没转）。
+
+- **转换后强制重新导入材质**：Shader Core 的模块状态要在材质重新导入后才会刷新 ✓，
+  否则会出现「转换完了但模块没生效」✓。
+
+- **不需要烘焙时把 `_BaseTexture` 指回源贴图**：以前会残留上一次转换留下的旧烘焙图 ✓
+  （有一件衣服因此一直是灰的 ✓）。
+
+- MatCap 颜色现在**总是写入**（以前源色是白就跳过 ✗，材质里可能留着上一次的旧颜色 ✗）。
+
+### 已知限制
+
+- **金属反射**：lilToon 的 `_UseReflection`（`_Metallic` / `_Smoothness` / 环境反射）在 NonToon 里没有对应能力 ✗，
+  只能近似成一个高光 —— 所以「靠反射变金」的部分（例如帽子的**羽毛 / 玫瑰花**）转换后会比原版**偏灰** ✓。
+  需要完全一致的话，这部分建议保留 lilToon 材质，或手动把 NonToon 的 Specular 调暖 + 降低 Roughness 近似。
+
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 ## [1.1.13] - 2026-09-17
