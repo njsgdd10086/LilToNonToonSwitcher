@@ -26,6 +26,67 @@ def fail(message: str) -> None:
     sys.exit(1)
 
 
+def count_braces(text: str) -> tuple:
+    """数花括号，但跳过字符串 / 字符字面量 / 注释里的（正则里的 \\{ 之类不然会误报）。"""
+    opens = closes = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        # 行注释
+        if ch == "/" and i + 1 < n and text[i + 1] == "/":
+            i = text.find("\n", i)
+            if i < 0:
+                break
+            continue
+        # 块注释
+        if ch == "/" and i + 1 < n and text[i + 1] == "*":
+            end = text.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            continue
+        # 字符串（含逐字字符串 @"..."，里面的 "" 是一个转义引号）
+        if ch == "@" and i + 1 < n and text[i + 1] == '"':
+            i += 2
+            while i < n:
+                if text[i] == '"':
+                    if i + 1 < n and text[i + 1] == '"':
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            continue
+        if ch == '"':
+            i += 1
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == '"':
+                    i += 1
+                    break
+                i += 1
+            continue
+        # 字符字面量
+        if ch == "'":
+            i += 1
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == "'":
+                    i += 1
+                    break
+                i += 1
+            continue
+        if ch == "{":
+            opens += 1
+        elif ch == "}":
+            closes += 1
+        i += 1
+    return opens, closes
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".", help="包根目录")
@@ -70,8 +131,9 @@ def main() -> int:
 
     for path in sources:
         text = path.read_text(encoding="utf-8")
-        if text.count("{") != text.count("}"):
-            fail(f"{path.name} 花括号不匹配（{{={text.count('{')} }}={text.count('}')}）")
+        opens, closes = count_braces(text)
+        if opens != closes:
+            fail(f"{path.name} 花括号不匹配（{{={opens} }}={closes}）")
 
     tag = args.tag
     if tag.startswith("v") and tag[1:] != version:
