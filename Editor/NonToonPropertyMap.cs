@@ -291,6 +291,44 @@ namespace NonToonSwitcher
                     to + " = (" + low.ToString("0.###") + ", " + high.ToString("0.###") + ")（换算回原始空间）");
             }, "边缘光边界/模糊/菲涅尔幂 -> 边缘光范围");
 
+            // 织物/细节法线模块（插件自带，会登记进 NonToon 的 Shader Core 模块列表）：
+            // 主 _NormalMap 的扰动在受光面没有出口（sd.lightColor 被 saturate 了），这个模块在
+            // __SC_PHASE_postpixel__ 里只把"法线扰动造成的明暗差"乘回去 —— 织物纹理就是这么显示出来的。
+            MapFunc("_BumpMap", "fabric", (src, dst, log) =>
+            {
+                var texture = ShaderUtility.HasProperty(src, "_BumpMap") ? src.GetTexture("_BumpMap") : null;
+                if (texture == null) return;
+                if (!FabricModuleInstaller.EnsureInstalled(log)) return;
+
+                var shader = dst.shader;
+                var mapProperty = FabricModuleInstaller.FindPropertyName(shader, "FabricNormalMap");
+                if (mapProperty == null)
+                {
+                    log.Warn("织物法线模块刚登记，NonToon 的 shader 还在重新生成 —— 请稍后再转换一次。");
+                    return;
+                }
+                dst.SetTexture(mapProperty, texture);
+
+                var normalStrength = FabricModuleInstaller.FindPropertyName(shader, "FabricNormalStrength");
+                if (normalStrength != null)
+                    ShaderUtility.SetFloatValue(dst, normalStrength,
+                        ShaderUtility.HasProperty(src, "_BumpScale") ? src.GetFloat("_BumpScale") : 1f);
+
+                var strength = FabricModuleInstaller.FindPropertyName(shader, "FabricStrength");
+                // 默认 0.25：强度扫描对照源 lilToon 后选的（0 = 平得像塑料，0.5 偏强，1.0 出现刺眼噪点）
+                if (strength != null) ShaderUtility.SetFloatValue(dst, strength, 0.25f);
+
+                var enable = FabricModuleInstaller.FindPropertyName(shader, "Enable");
+                if (enable != null)
+                {
+                    ShaderUtility.SetIntPersistent(dst, enable, 1);
+                    var key = enable.ToUpperInvariant();
+                    dst.EnableKeyword(key + "_1");
+                    dst.DisableKeyword(key + "_0");
+                    log.Mapped("_BumpMap → 织物法线模块", enable + " = 1");
+                }
+            }, "织物/细节法线模块");
+
             // ----- matcap -----
             // lilToon 的 lilBlendColor：0 = Normal（**直接用 matcap 颜色替换**）、1 = Add、2 = Screen、3 = Multiply。
             // NonToon 只有 Multiply / Add 两个槽，所以 0/1/2 都放到 Add（叠加最接近"替换"），只有真正的
