@@ -17,5 +17,10 @@
         "url": "https://github.com/njsgdd10086"
     },
     "license": "MIT",
-    "hideInEditor": false
+    "hideInEditor": false,
+    "vpmDependencies": {
+        "jp.lilxyzw.shadercore": "^0.1.5",
+        "jp.lilxyzw.nontoon": "^0.1.3",
+        "com.nontoon.modules": "^0.1.0"
+    }
 }
