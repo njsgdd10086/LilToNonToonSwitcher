@@ -1,24 +1,15 @@
-**LilToNonToon Switcher 1.1.15 —— 织物模块拆分为独立的 NonToon Modules 包**
+**LilToNonToon Switcher 1.1.16** —— 放宽依赖范围，兼容 NonToon 0.2.0 / Shader Core 0.2.0
 
-## [1.1.15] - 2026-09-17
-
-这一版做了**架构调整**：把 Shader Core 模块从插件里拆出去，做成独立的模块包。功能不变，但模块可以单独安装使用了。
+## [1.1.16] - 2026-10-02
 
 ### 变更
 
-- **织物/法线细节模块搬到新包 `com.nontoon.modules`**（仓库 NonToon Modules）✓ ——
-  本插件现在通过 VPM 依赖**订阅**它（`vpmDependencies`）✓，插件里不再包含任何 Shader Core 模块文件 ✓；
-- 转换时会调用模块包的 API **自动勾选**织物模块（幂等 ✓，没登记就登记 + 重新生成 NonToon shader ✓）；
-- 调用的方式是**反射** ✓ —— 模块包万一没装，本插件仍能正常编译 ✓，只在转换日志里给一条明确提示 ✓；
-- 菜单新增 `Tools/LilToNonToon Switcher/打开 NonToon 模块管理` ✓（跳到模块包的勾选界面 ✓）。
+- **放宽依赖范围**：`jp.lilxyzw.shadercore` / `jp.lilxyzw.nontoon` 由 `^0.1.5` / `^0.1.3` 改成
+  `>=0.1.5` / `>=0.1.3`，`com.nontoon.modules` 改成 `>=0.1.0` ✓ ——
+  否则 NonToon 0.2.0 一发布，本插件就会因为版本冲突装不上 ✗。
 
-### 说明
+### 兼容性说明
 
-- 升级后请让 VCC/ALCOM 一并安装 `com.nontoon.modules`（依赖会自动带上 ✓）；
-- **如果之前手动把本插件的 `Shaders` 目录拷进过工程**，请删掉那份旧副本 ✗ ——
-  同一个模块 id 出现两次会被 Shader Core 重复编入 shader 导致编译错误；
-  模块包的勾选界面发现重复时也会在 Console 里提示该删哪一份 ✓。
-
-### 模块本身没变
-
-织物模块的算法与默认值同 1.1.14（强度 0.25 ✓、方向 0.35 / -0.5 ✓、软压缩 ✓），只是换了家。
+逐文件对比了 NonToon 0.1.3 → 0.2.0 与 Shader Core 0.1.12 → 0.2.0：转换器与织物模块依赖的内部细节都没变 ✓
+（phase 钩子、`ProjectSettings` 白名单 API、`SCConstValue` 关键字机制、`SCShaderImporter` 全部一致 ✓），
+所以本版**代码无变化**，只是依赖范围放开。NonToon 0.2.0 的新功能是接入 VRC Light Volumes ✓（对我们无影响 ✓）。
