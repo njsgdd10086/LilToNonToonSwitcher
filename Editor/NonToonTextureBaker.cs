@@ -589,10 +589,14 @@ namespace NonToonSwitcher
 
             // lilToon 的阴影在窗口内是**分段线性**的，所以只要把"窗口边界"当关键点就完全等价。
             // （Unity 的 Gradient 最多 8 个颜色关键点：0 / 1 + 每层 2 个边界 = 最多 8 个，正好够）
+            // 实测：NonToon 自己的 Shade 模块只吃核心属性 + _SharedGradients（我们自建模块的属性到不了 shader），
+// 所以裙子这类材质的明暗层次完全取决于色带形状。把过渡窗口按 1.6 倍展宽，暗部会更早进入、
+// 中间调随之压暗（实测目标：裙区中位 0.693 → lil 的 0.534）。
+            const float WindowBlurScale = 1.6f;
             var stops = new List<float> { 0f, 1f };
-            AddWindowStops(stops, border1, blur1);
-            if (use2) AddWindowStops(stops, border2, blur2);
-            if (use3) AddWindowStops(stops, border3, blur3);
+            AddWindowStops(stops, border1, blur1 * WindowBlurScale);
+            if (use2) AddWindowStops(stops, border2, blur2 * WindowBlurScale);
+            if (use3) AddWindowStops(stops, border3, blur3 * WindowBlurScale);
             stops.Sort();
 
             var avgAlbedo = AverageAlbedo(material, log, "_ShadowColor 换算用的");
