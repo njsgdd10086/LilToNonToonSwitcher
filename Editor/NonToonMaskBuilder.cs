@@ -225,6 +225,11 @@ namespace NonToonSwitcher
                 // 插值"的权重。之前按强度倍数处理，导致 _EmissionMainStrength=0 的材质直接不发光（Atri），
                 // 而 =1 的材质整片平加、把脸冲爆（Shinano 实测：整脸爆白）。另外形状必须来自 _EmissionBlendMask，
                 // 不是 _EmissionMap 的 alpha —— Shinano 的 _EmissionMap alpha 整张都是 1，直接用会把整脸点亮。
+                // 注意：**_EmissionMap 为空不代表没有自发光**。实测 Shinano_face：
+                //   _UseEmission=1、_EmissionColor=(1.79,1.92,2.12, a=0.16)、_EmissionMap **为空**、
+                //   _EmissionBlendMask 有贴图 —— lilToon 里 `emissionColor *= _EmissionMap` 用的是
+                //   **默认白贴图**（空槽不改变颜色），形状完全由 _EmissionBlendMask 提供。
+                // 之前这里在 _EmissionMap 为空时直接放弃 ⇒ 输出 1x1 黑图 ⇒ 眼睛高光丢失（用户实测）。
                 var emissionMap = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionMap")
                     ? lilToonMaterial.GetTexture("_EmissionMap") as Texture2D
                     : null;
@@ -233,6 +238,9 @@ namespace NonToonSwitcher
                     : null;
                 var usesEmissionMask = emissionMask != null &&
                     System.Array.IndexOf(lilToonMaterial.shaderKeywords, "LIL_FEATURE_EmissionBlendMask") >= 0;
+                // 没有 _EmissionMap 时，把蒙版本身当作形状来源（蒙版的 A 就是形状）
+                var shapeTexture = emissionMap != null ? emissionMap : (usesEmissionMask ? emissionMask : null);
+                var shapeIsMask = emissionMap == null && usesEmissionMask;
 
                 var emissionColor = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionColor")
                     ? lilToonMaterial.GetColor("_EmissionColor")
@@ -244,8 +252,8 @@ namespace NonToonSwitcher
                     ? Mathf.Clamp01(lilToonMaterial.GetFloat("_EmissionMainStrength"))
                     : 0f;
 
-                if (emissionMap != null &&
-                    ReadPixels(emissionMap, out var mapPixels, out var mapWidth, out var mapHeight, log, "自发光贴图"))
+                if (shapeTexture != null &&
+                    ReadPixels(shapeTexture, out var mapPixels, out var mapWidth, out var mapHeight, log, "自发光形状"))
                 {
                     Color[] maskPixels2 = null;
                     var maskWidth2 = 0;
@@ -270,8 +278,10 @@ namespace NonToonSwitcher
                         {
                             var sx = Mathf.Clamp(x * mapWidth / width, 0, mapWidth - 1);
                             var m = mapPixels[sy * mapWidth + sx];
+                            // 形状来自蒙版时，取它的 alpha（形状通道）；来自 _EmissionMap 时取 RGB（lil 的默认白语义）
+                            if (shapeIsMask) m = new Color(m.r, m.g, m.b, m.a);
                             var em = new Vector3(emissionColor.r * m.r, emissionColor.g * m.g, emissionColor.b * m.b);
-                            if (maskPixels2 != null)
+                            if (maskPixels2 != null && !shapeIsMask)
                             {
                                 var mx = Mathf.Clamp(x * maskWidth2 / width, 0, maskWidth2 - 1);
                                 var my = Mathf.Clamp(y * maskHeight2 / height, 0, maskHeight2 - 1);
@@ -284,7 +294,8 @@ namespace NonToonSwitcher
                                 Mathf.Lerp(em.x, em.x * albedo.r, emissionMainStrength),
                                 Mathf.Lerp(em.y, em.y * albedo.g, emissionMainStrength),
                                 Mathf.Lerp(em.z, em.z * albedo.b, emissionMainStrength));
-                            var value = emissionBlend * m.a;      // lil: _EmissionBlend * emissionColor.a
+                            // lil: emissionBlend = _EmissionBlend * emissionColor.a（emissionColor.a 已含贴图与蒙版的 alpha）
+                            var value = emissionBlend * emissionColor.a * m.a;
                             emissionPixels[y * width + x] = new Color(em.x * value, em.y * value, em.z * value, 1f);
                             var target = pixels[y * width + x];
                             target.r = em.x * value;
