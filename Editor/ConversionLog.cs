@@ -17,6 +17,13 @@ namespace NonToonSwitcher
         public bool BakeBaseTexture;
         public bool BakeSharedMask;
 
+        /// <summary>
+        /// 阴影亮度补偿系数 K（1 = 不需要）。lilToon 的阴影色是绝对颜色、可以比本体亮，而 NonToon 的
+        /// Shade 是乘算（ramp ≤ 1），所以要把基础色贴图提亮 K 倍、渐变受光端写成 1/K，乘起来才等价于
+        /// lilToon 的 lerp(indirect, direct, lns)。base 贴图烘焙与渐变烘焙必须用同一个值。
+        /// </summary>
+        public float ShadeBrightness = 1f;
+
         public readonly List<string> Mappings = new List<string>();
         public readonly List<string> Warnings = new List<string>();
         public readonly List<string> Errors = new List<string>();

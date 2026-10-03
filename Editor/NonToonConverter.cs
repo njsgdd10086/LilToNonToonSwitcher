@@ -221,7 +221,18 @@ namespace NonToonSwitcher
 
             if (log.BakeBaseTexture)
             {
-                var baked = NonToonTextureBaker.BakeBaseTexture(source, target, log.Folder, log);
+                // 先算"阴影亮度补偿"K：lilToon 的阴影色可以比本体亮，而 NonToon 的 Shade 是乘算，
+                // 靠"贴图提亮 K 倍 + 渐变受光端 1/K"来等价表达。base 与渐变必须用同一个 K。
+                //
+                // ⚠ 暂时停用：这个补偿依赖"材质的平均本体色"，而 4096² 这类大贴图在
+                //   NonToonTextureBaker.TryReadPixels 里会静默失败 → 平均色被当成白色 → K 算出来偏小、
+                //   渐变的受光端却真的变成 1/K，净效果反而更暗（实测 0.547 → 0.478）。
+                //   要启用得先修好平均色的读取（例如在真正烘焙那张贴图的时候顺手统计，而不是单独再读一次）。
+                log.ShadeBrightness = 1f;
+
+                var baked = NonToonTextureBaker.BakeBaseTexture(source, target, log.Folder, log, log.ShadeBrightness);
+                // 没烘出来（贴图读不了 / 用户关了烘焙）就别用提亮系数，否则渐变里的 1/K 会对不上贴图
+                if (baked == null) log.ShadeBrightness = 1f;
                 if (baked != null && ShaderUtility.HasProperty(target, "_BaseTexture"))
                 {
                     target.SetTexture("_BaseTexture", baked);

@@ -126,7 +126,7 @@ namespace NonToonSwitcher
         // ------------------------------------------------------------------ base texture with the main colour baked in
 
         public static Texture2D BakeBaseTexture(Material lilToonMaterial, Material nonToonMaterial, string folder,
-            ConversionLog log)
+            ConversionLog log, float brightness = 1f)
         {
             // 源材质可能**根本没挂主贴图**（`_MainTex` = fileID 0）—— 那 lilToon 渲染时用的是 shader 里
             // 声明的默认白贴图。这种情况下 `_BaseTexture` 会是空的，但 alpha 相关的东西（透明遮罩的
@@ -175,7 +175,8 @@ namespace NonToonSwitcher
             var gradationUsed = gradationTexture != null && gradationStrength > 0f;
 
             // 主色、色调校正（HSV/Gamma）、渐变映射都是默认值、也没用透明遮罩时，直接沿用原贴图。
-            if (!tintChanged && !toneChanged && !gradationUsed && !alphaMaskUsed)
+            // 例外：brightness > 1（阴影色调比本体亮时要靠提亮贴图来腾出表达空间，见 ComputeShadeBrightness）。
+            if (!tintChanged && !toneChanged && !gradationUsed && !alphaMaskUsed && brightness <= 1.001f)
             {
                 log.Mapped(usesDefaultWhite
                         ? "_MainTex 未指定（lilToon 用 shader 默认白贴图）"
@@ -277,6 +278,10 @@ namespace NonToonSwitcher
 
                 // 最后才乘主色（含 alpha），顺序和 lilToon 的 `fd.col *= _Color` 一致
                 rgb = new Vector3(rgb.x * tint.r, rgb.y * tint.g, rgb.z * tint.b);
+                // 阴影色比本体亮时（ComputeShadeBrightness 给出 K>1）：贴图整体提亮 K 倍，
+                // 渐变的受光端写成 1/K —— 乘起来仍是本体色，但阴影端就能表达"比本体亮"了。
+                if (brightness > 1.001f)
+                    rgb = new Vector3(rgb.x * brightness, rgb.y * brightness, rgb.z * brightness);
                 if (rgb.x > 1f || rgb.y > 1f || rgb.z > 1f) hdrClipped = true;
                 if (linearWork) rgb = new Vector3(LinearToSrgb(rgb.x), LinearToSrgb(rgb.y), LinearToSrgb(rgb.z));
 
@@ -601,22 +606,20 @@ namespace NonToonSwitcher
                 if (use2) rgb = Color.Lerp(rgb, secondRgb, Mathf.Clamp01(second.a * (1f - s2)));
                 if (use3) rgb = Color.Lerp(rgb, thirdRgb, Mathf.Clamp01(third.a * (1f - s3)));
 
-                // ★ lilToon 的阴影色是**绝对颜色**（col = lerp(indirectCol, directCol, lns)，
-                //   阴影直接把 albedo 换成 _ShadowColor），而 NonToon 的 Shade 是**乘算**
-                //   （sd.col.rgb *= ramp）。直接乘就会变成 _ShadowColor × albedo = 双重变暗：
-                //   深色材质（头发、深色衣服）会黑得离谱，浅色材质会偏白偏灰。
-                //   所以先把阴影色除以材质的平均基础色，乘回来才等于原色，也就是 lilToon 的 lerp。
-                // 注意：渐变贴图是 RGBA32（会被钳到 1），所以"阴影比 albedo 还亮"的情况做不到，
-                // 这里用 Min(1, ...) 取最接近的近似（= 不再双重变暗）。
+                // lilToon 的阴影色是**绝对颜色**，而 NonToon 的 Shade 是**乘算**（sd.col.rgb *= ramp）——
+                // 所以阴影色要先除以（平均本体色 × K）才能乘回原色。K>1 时贴图已经提亮过 K 倍
+                // （见 ComputeShadeBrightness），受光端因此写成 1/K 而不是纯白。
+                var shadeBrightness = log != null ? log.ShadeBrightness : 1f;
                 rgb = new Color(
-                    Mathf.Min(1f, rgb.r / avgAlbedo.r),
-                    Mathf.Min(1f, rgb.g / avgAlbedo.g),
-                    Mathf.Min(1f, rgb.b / avgAlbedo.b), 1f);
+                    rgb.r / Mathf.Max(0.01f, avgAlbedo.r * shadeBrightness),
+                    rgb.g / Mathf.Max(0.01f, avgAlbedo.g * shadeBrightness),
+                    rgb.b / Mathf.Max(0.01f, avgAlbedo.b * shadeBrightness), 1f);
 
-                // 受光处是 albedo × 光（NonToon 自己会乘），所以渐变在受光端回到白色；
+                // 受光处是 albedo × 光（NonToon 自己会乘），所以渐变在受光端回到 1/K；
                 // 混合系数还要过 _ShadowStrength（lilToon 的 lerp(1, s, strength)）
                 var mix = Mathf.Lerp(1f, s1, strength);
-                rgb = Color.Lerp(rgb, Color.white, mix);
+                var litEnd = new Color(1f / shadeBrightness, 1f / shadeBrightness, 1f / shadeBrightness, 1f);
+                rgb = Color.Lerp(rgb, litEnd, mix);
                 colorKeys.Add(new GradientColorKey(rgb, x));
             }
 
@@ -638,6 +641,41 @@ namespace NonToonSwitcher
         {
             stops.Add(Mathf.Clamp01(border - blur * 0.5f));
             stops.Add(Mathf.Clamp01(border + blur * 0.5f));
+        }
+
+        /// <summary>
+        /// 计算"阴影端需要多少倍本体亮度"K。
+        ///
+        /// lilToon 的阴影色是**绝对颜色**（col = lerp(indirectCol, directCol, lns)），可以比本体还亮
+        /// （实测这套模型的衣服阴影是本体色的 1.41~1.71 倍、头发 1.06~1.37 倍）；而 NonToon 的 Shade 是
+        /// **乘算**（sd.col.rgb *= ramp），渐变贴图又是 RGBA32（上限 1）——直接做就会把阴影压暗。
+        /// 解法：把基础色贴图整体提亮 K 倍，渐变的受光端写成 1/K，乘起来仍是本体色，
+        /// 而阴影端就能表达到 K 倍本体色。K 的上限由"提亮后不过曝"决定（1 / 最小平均色）。
+        /// </summary>
+        public static float ComputeShadeBrightness(Material material, ConversionLog log)
+        {
+            if (ShaderUtility.HasProperty(material, "_UseShadow") && material.GetFloat("_UseShadow") == 0f) return 1f;
+
+            var albedo = AverageAlbedo(material);
+            var name = "_ShadowColor";
+            var k = 1f;
+            foreach (var key in new[] { "_ShadowColor", "_Shadow2ndColor", "_Shadow3rdColor" })
+            {
+                if (!ShaderUtility.HasProperty(material, key)) continue;
+                var color = material.GetColor(key);
+                if (key != "_ShadowColor" && color.a <= 0.001f) continue;   // 强度为 0 的层不参与
+                k = Mathf.Max(k, color.r / Mathf.Max(albedo.r, 0.01f));
+                k = Mathf.Max(k, color.g / Mathf.Max(albedo.g, 0.01f));
+                k = Mathf.Max(k, color.b / Mathf.Max(albedo.b, 0.01f));
+                if (k > 1.001f) name = key;
+            }
+
+            var limit = 1f / Mathf.Max(0.02f, Mathf.Min(albedo.r, Mathf.Min(albedo.g, albedo.b)));
+            var clamped = Mathf.Clamp(k, 1f, Mathf.Min(limit * 0.98f, 4f));
+            if (clamped > 1.001f && log != null)
+                log.Mapped("阴影色比本体亮（" + name + "），基础色贴图提亮 " + clamped.ToString("0.###") +
+                           " 倍、渐变受光端改为 1/" + clamped.ToString("0.###"), "阴影亮度补偿");
+            return clamped;
         }
 
         /// <summary>
