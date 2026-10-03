@@ -592,11 +592,11 @@ namespace NonToonSwitcher
             // 实测：NonToon 自己的 Shade 模块只吃核心属性 + _SharedGradients（我们自建模块的属性到不了 shader），
 // 所以裙子这类材质的明暗层次完全取决于色带形状。把过渡窗口按 2.6 倍展宽，暗部会更早进入、
 // 中间调随之压暗（实测目标：裙区中位 0.693 → lil 的 0.534）。
-            const float WindowBlurScale = 2.6f;
+            var windowScale = NonToonSwitcherSettings.instance.GradientWindowScale;
             var stops = new List<float> { 0f, 1f };
-            AddWindowStops(stops, border1, blur1 * WindowBlurScale);
-            if (use2) AddWindowStops(stops, border2, blur2 * WindowBlurScale);
-            if (use3) AddWindowStops(stops, border3, blur3 * WindowBlurScale);
+            AddWindowStops(stops, border1, blur1 * windowScale);
+            if (use2) AddWindowStops(stops, border2, blur2 * windowScale);
+            if (use3) AddWindowStops(stops, border3, blur3 * windowScale);
             stops.Sort();
 
             var avgAlbedo = AverageAlbedo(material, log, "_ShadowColor 换算用的");
@@ -643,7 +643,7 @@ namespace NonToonSwitcher
                 // 但对比跨度偏小 —— 我们 暗25%=0.502 / 亮25%=0.832（跨度 0.330），lil 是 0.443 / 0.887（0.444）。
                 // 也就是暗部不够暗、亮部不够亮。这里把色带的暗端按 0.78 收一点（x=1 处不动），
                 // 让跨度回到 lil 的量级；亮端受 lightColor 上限约束，靠主光补正那条一起抬。
-                var darkEnd = Mathf.Lerp(0.70f, 1f, x);
+                var darkEnd = Mathf.Lerp(NonToonSwitcherSettings.instance.GradientDarkEnd, 1f, x);
                 rgb = new Color(rgb.r * darkEnd, rgb.g * darkEnd, rgb.b * darkEnd, 1f);
 
                 var mix = Mathf.Lerp(1f, s1, strength);
@@ -930,3 +930,5 @@ namespace NonToonSwitcher
 
 // touch 639266635824848705
 
+
+// touch r29

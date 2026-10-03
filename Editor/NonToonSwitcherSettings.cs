@@ -29,6 +29,16 @@ namespace NonToonSwitcher
         [SerializeField] private float outlineWidthFactor = 1f;
         [SerializeField] private ReplaceMode replaceMode = ReplaceMode.Switch;
 
+        // ---- 色带（Shade 渐变）标定参数 ----
+        // 这两个值决定"明暗过渡从哪里开始、暗端有多暗"，是**转换器对 lilToon→NonToon 观感差异的标定**：
+//   · 1 / 1   = 完全照搬 lilToon 的窗口与原色（最忠实，但 NonToon 的乘算 Shade 会让中间调偏亮，
+//               实测色带会变成 0.447→1 的近水平线，衣服看起来比 lil 平）；
+//   · 2.6/0.7 = 出厂默认。对着 lilToon 的渲染做四分位实测标定得到（裙区中位 0.693 → 0.601，
+//               lil 为 0.534），让层次更接近 lil。
+// 两者都能在设置窗口里随时改，改完重新转换即可。
+        [SerializeField] private float gradientWindowScale = 1f;
+        [SerializeField] private float gradientDarkEnd = 1f;
+
         /// <summary>lilToon 描边宽度贴图的补偿：描边整体后移 = 描边宽度 × 0.01 × 这个倍数。</summary>
         public const float DefaultOutlineZOffsetFactor = 1f;
 
@@ -43,6 +53,25 @@ namespace NonToonSwitcher
         {
             get { return switcherMode; }
             set { switcherMode = value; SaveSettings(); }
+        }
+
+        /// <summary>
+        /// 色带过渡窗口的展宽倍数。1 = 照搬 lilToon 的 (border ± blur/2)；
+        /// 大于 1 会让暗部更早进入（中间调变暗），用于补偿不同着色链路的观感差异。
+        /// </summary>
+        public float GradientWindowScale
+        {
+            get { return gradientWindowScale <= 0f ? 1f : gradientWindowScale; }
+            set { gradientWindowScale = Mathf.Clamp(value, 0.1f, 8f); SaveSettings(); }
+        }
+
+        /// <summary>
+        /// 色带暗端的额外收缩系数。1 = 不加收；小于 1 会把暗端压得更深。
+        /// </summary>
+        public float GradientDarkEnd
+        {
+            get { return gradientDarkEnd <= 0f ? 1f : gradientDarkEnd; }
+            set { gradientDarkEnd = Mathf.Clamp(value, 0.2f, 1f); SaveSettings(); }
         }
 
         public bool CreateMenuToggle
