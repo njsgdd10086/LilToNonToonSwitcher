@@ -226,6 +226,18 @@ namespace NonToonSwitcher
                     "即整体透明度偏移 " + alphaMaskValue.ToString("0.###"));
             }
 
+            // ★ 不需要任何校正时，直接沿用原贴图，绝不重新写一张。
+            //   实测（公平对比：两边都用 Unity 里的 1024x1024）：重新烘出来的贴图均值 0.818 而原图是 0.731，
+            //   暗部 0.299 vs 0.236、亮部直接削平到 1.0 —— 肉眼看就是"衣服干净发白、褶皱消失"。
+            //   既然没有色调/渐变/主色要算，拷贝没有任何意义，只会引入损失。
+            var tintIsWhite = Mathf.Approximately(tint.r, 1f) && Mathf.Approximately(tint.g, 1f) && Mathf.Approximately(tint.b, 1f);
+            if (!toneChanged && gradationPixels == null && tintIsWhite && source is Texture2D)
+            {
+                nonToonMaterial.SetTexture("_BaseTexture", source);
+                log.Mapped("基础贴图（无色调/渐变/主色/透明遮罩需要烘焙）", "直接沿用原贴图 " + source.name + "（不重写，避免提亮与细节损失）");
+                return source as Texture2D;
+            }
+
             // 取基础像素：正常情况读原贴图；源材质没挂主贴图时用白底（对应 lilToon 的默认白贴图），
             // 尺寸跟着透明遮罩走，这样遮罩的逐像素差异不会丢。
             Color[] pixels;
