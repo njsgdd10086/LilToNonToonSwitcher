@@ -941,17 +941,16 @@ namespace NonToonSwitcher
                 var parent = FindSwitcherParent(request.Targets);
                 var swapRoot = FindSwapRoot(request.Targets);
 
-                // 同一个 avatar 下已经转换过一次时，把新材质追加到已有的开关里，
-                // 而不是再建一个（否则转几次就会出现几个开关 —— 实测踩到过：同一个 avatar 下并排
-                // 躺着三个内容完全相同的 _NonToonSwitch，各 15 条，就是"总是新建"选项没关）。
+                // 同一个 avatar 下已经转换过一次时，把新材质追加到已有的开关里，而不是再建一个。
                 //
-                // 这里**不再限制模式**：以前只在 MaterialSetter 模式下尝试复用，于是切到
-                // MaterialSwap 模式后每次转换都会新建一个。现在统一先试追加，追加不了
-                // （例如已有开关不是 MaterialSetter）AppendToMaterialSetter 会返回 -1，再照旧新建。
+                // 这里**无条件**查找已有的开关：曾经它受设置项 ReuseExistingSwitcher 控制，而那个选项
+                // 一旦被关掉（菜单 Tools/LilToNonToon Switcher/转换时总是新建 _NonToonSwitch），
+                // 每转换一次就会多出一个内容完全相同的 _NonToonSwitch —— 实测同一个 avatar 下并排躺着
+                // 三个，各 15 条一模一样。用户要的行为是「圈一批转一次只出一个」，所以复用不再可关。
+                // 已有的开关不是 MaterialSetter（例如旧的 MaterialSwap 开关）时，AppendToMaterialSetter
+                // 会返回 -1，此时才照旧新建。
                 var reused = false;
-                var existing = request.ReuseExistingSwitcher
-                    ? FindExistingSwitcher(request.Targets, parent)
-                    : null;
+                var existing = FindExistingSwitcher(request.Targets, parent);
                 if (existing != null)
                 {
                     var added = NonToonSwitcherBuilder.AppendToMaterialSetter(existing, pairs,

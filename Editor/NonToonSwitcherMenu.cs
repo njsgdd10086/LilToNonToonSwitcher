@@ -56,47 +56,19 @@ namespace NonToonSwitcher
             NonToonEnvironmentCheck.LogReport();
         }
 
-        // ------------------------------------------------------------------ 复用开关的选项
+        // ------------------------------------------------------------------ 开关复用（已固定为"一个 avatar 一个开关"）
         //
-        // Unity 没有复选菜单项，所以按惯例做成两项互斥 + 打勾标记。
+        // 以前这里有一对互斥菜单项「转换时复用已有的 _NonToonSwitch / 转换时总是新建」，默认复用。
+        // 但只要有人点了"总是新建"，之后每转换一次就会多出一个内容完全相同的 _NonToonSwitch
+        // （实测同一个 avatar 下并排躺着三个，各 15 条一模一样），而用户要的行为是
+        // 「圈一批、转一次、只出一个开关」。所以这个选项**取消了**，复用写死在转换流程里。
 
-        private const string ReuseOnPath = "Tools/LilToNonToon Switcher/转换时复用已有的 _NonToonSwitch";
-        private const string ReuseOffPath = "Tools/LilToNonToon Switcher/转换时总是新建 _NonToonSwitch";
-
-        [MenuItem(ReuseOnPath, false, 140)]
-        private static void EnableReuse()
+        [MenuItem("Tools/LilToNonToon Switcher/开关复用说明", false, 140)]
+        private static void ExplainReuse()
         {
-            var settings = NonToonSwitcherSettings.instance;
-            settings.ReuseExistingSwitcher = true;
-            Menu.SetChecked(ReuseOnPath, true);
-            Menu.SetChecked(ReuseOffPath, false);
-            Debug.Log("[LilToNonToon] 转换时会复用同一个 avatar 下已有的 " + NonToonConverter.SwitcherObjectName +
-                      "，新材质会追加进去。");
-        }
-
-        [MenuItem(ReuseOnPath, true)]
-        private static bool EnableReuseValidate()
-        {
-            Menu.SetChecked(ReuseOnPath, NonToonSwitcherSettings.instance.ReuseExistingSwitcher);
-            return true;
-        }
-
-        [MenuItem(ReuseOffPath, false, 141)]
-        private static void DisableReuse()
-        {
-            var settings = NonToonSwitcherSettings.instance;
-            settings.ReuseExistingSwitcher = false;
-            Menu.SetChecked(ReuseOnPath, false);
-            Menu.SetChecked(ReuseOffPath, true);
-            Debug.Log("[LilToNonToon] 转换时总是新建 " + NonToonConverter.SwitcherObjectName +
-                      "（每次转换都会产生一个新的开关）。");
-        }
-
-        [MenuItem(ReuseOffPath, true)]
-        private static bool DisableReuseValidate()
-        {
-            Menu.SetChecked(ReuseOffPath, !NonToonSwitcherSettings.instance.ReuseExistingSwitcher);
-            return true;
+            Debug.Log("[LilToNonToon] 同一个 avatar 下只会有一个 " + NonToonConverter.SwitcherObjectName +
+                      "：第一次转换创建它，之后每次转换都把新材质**追加**进去（已存在的条目会跳过），" +
+                      "不会再新建第二个。");
         }
 
         // ------------------------------------------------------------------ 转换方式（三选一）
