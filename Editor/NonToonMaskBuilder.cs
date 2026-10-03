@@ -74,6 +74,9 @@ namespace NonToonSwitcher
             Color[] pixels = null;
             var width = 0;
             var height = 0;
+            Color[] emissionPixels = null;
+            var emissionWidth = 0;
+            var emissionHeight = 0;
             var used = new List<string>();
             var channelOwner = new string[4];
             // 自发光专用：R/G/B 三个通道留给"形状 × 强度 × 颜色"（见下面的 emission 段落），
@@ -236,6 +239,9 @@ namespace NonToonSwitcher
                         pixels = new Color[width * height];
                         for (var i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
                     }
+                    emissionWidth = width;
+                    emissionHeight = height;
+                    emissionPixels = new Color[width * height];
                     for (var y = 0; y < height; y++)
                     {
                         var sy = Mathf.Clamp(y * shapeHeight / height, 0, shapeHeight - 1);
@@ -243,6 +249,7 @@ namespace NonToonSwitcher
                         {
                             var sx = Mathf.Clamp(x * shapeWidth / width, 0, shapeWidth - 1);
                             var value = shapePixels[sy * shapeWidth + sx].a * emissionStrength;
+                            emissionPixels[y * width + x] = new Color(value * emissionColor.r, value * emissionColor.g, value * emissionColor.b, 1f);
                             var target = pixels[y * width + x];
                             target.r = value * emissionColor.r;
                             target.g = value * emissionColor.g;
@@ -276,6 +283,30 @@ namespace NonToonSwitcher
                     var cleared = pixels[i];
                     cleared.r = 0f; cleared.g = 0f; cleared.b = 0f;
                     pixels[i] = cleared;
+                }
+            }
+
+            // 自发光单独出一张贴图（共享遮罩带 [SCMask] 特性，运行时被 Shader Core 自己的遮罩系统接管，
+            // 实测写进去的值读不到 —— shader 里 sd.mask 恒为白）。所以模块自带一个普通贴图槽 _EmissionTexture。
+            // 自发光贴图永远要有一张：空槽在 shader 里采样是白色，会被当成满强度自发光。
+            if (emissionPixels == null || emissionWidth <= 0 || emissionHeight <= 0)
+            {
+                emissionPixels = new Color[] { new Color(0f, 0f, 0f, 1f) };
+                emissionWidth = 1;
+                emissionHeight = 1;
+            }
+            if (emissionPixels != null && emissionWidth > 0 && emissionHeight > 0)
+            {
+                var dir2 = folder.Replace('\\', '/').TrimEnd('/');
+                EnsureFolder(dir2);
+                var emPath = dir2 + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
+                WriteTexture(emissionPixels, emissionWidth, emissionHeight, emPath);
+                AssetDatabase.ImportAsset(emPath, ImportAssetOptions.ForceUpdate);
+                var emAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(emPath);
+                if (emAsset != null && ShaderUtility.HasProperty(nonToonMaterial, "_EmissionTexture"))
+                {
+                    nonToonMaterial.SetTexture("_EmissionTexture", emAsset);
+                    log.Mapped("自发光贴图", "_EmissionTexture（" + emAsset.name + "）");
                 }
             }
 
@@ -458,3 +489,6 @@ namespace NonToonSwitcher
         }
     }
 }
+
+// touch 639266595220365095
+
