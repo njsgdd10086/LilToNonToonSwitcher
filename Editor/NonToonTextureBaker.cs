@@ -268,6 +268,11 @@ namespace NonToonSwitcher
 
             var hdrClipped = false;
             var toneCompensated = false;
+            Color[] emissionPixels = null;
+            var emissionW = 0;
+            var emissionH = 0;
+            var hasEmission = false;
+            var emissionDone = false;
             for (var i = 0; i < pixels.Length; i++)
             {
                 var pixel = pixels[i];
@@ -304,6 +309,46 @@ namespace NonToonSwitcher
                     toneCompensated = true;
                 }
                 if (rgb.x > 1f || rgb.y > 1f || rgb.z > 1f) hdrClipped = true;
+                // 自发光（逐材质）：照 lilToon 的合成公式加算到最终颜色上。
+                // 只烘进**这张材质自己的基础贴图**，绝不写共享遮罩 —— 那是全模块共用资源，
+                // 写逐材质数据会污染全局（实测：脸上的高光数据被其它材质读到 ⇒ 洋红/黄块）。
+                // 实测依据：Shinano_face（_UseEmission=1）的眼睛高光就来自 _EmissionMap，
+                // 不做这一步，lil 与 NonToon 的眼睛观感差距明显。
+                // 自发光（逐材质）：合并**这张材质自己的**发射贴图，逐像素加算。
+                // 遮罩构建器已经按 lilToon 的公式（lil_common_frag.hlsl 1819~1861）烘出了
+                // <材质名>_Emission.png，这里只是把它并进基础贴图 —— 基础贴图是逐材质的，
+                // 不会像共享遮罩那样污染其它材质（实测洋红/黄块的根源就是共享遮罩被逐材质数据污染）。
+                // 实测依据：Shinano_face(_UseEmission=1) 的眼睛高光来自 _EmissionMap，不合并就没有高光。
+                if (!emissionDone)
+                {
+                    emissionDone = true;
+                    var emPath = folder.Replace('\\', '/').TrimEnd('/') + "/" +
+                                 ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
+                    var emTex = AssetDatabase.LoadAssetAtPath<Texture2D>(emPath);
+                    Color[] emPixels; int emW, emH;
+                    if (emTex != null && NonToonMaskBuilder.ReadPixels(emTex, out emPixels, out emW, out emH, log, "自发光贴图")
+                        && emW > 0 && emH > 0)
+                    {
+                        // 1x1 黑图（无自发光）时整张平均为 0，等于什么都没加
+                        double emSum = 0;
+                        for (var k = 0; k < emPixels.Length; k++) emSum += emPixels[k].r + emPixels[k].g + emPixels[k].b;
+                        if (emSum > 0.0001)
+                        {
+                            emissionPixels = emPixels;
+                            emissionW = emW;
+                            emissionH = emH;
+                            hasEmission = true;
+                            log.Mapped("自发光（合并 " + System.IO.Path.GetFileName(emPath) + "）", "逐像素加算进 _BaseTexture");
+                        }
+                    }
+                }
+                if (hasEmission && emissionPixels != null)
+                {
+                    var ex = Mathf.Clamp(i % width * emissionW / Mathf.Max(1, width), 0, emissionW - 1);
+                    var ey = Mathf.Clamp(i / width * emissionH / Mathf.Max(1, height), 0, emissionH - 1);
+                    var ep = emissionPixels[ey * emissionW + ex];
+                    rgb = new Vector3(rgb.x + ep.r, rgb.y + ep.g, rgb.z + ep.b);
+                }
                 if (linearWork) rgb = new Vector3(LinearToSrgb(rgb.x), LinearToSrgb(rgb.y), LinearToSrgb(rgb.z));
 
                 // 透明遮罩：lilToon 是在主色之后、cutout 之前改 alpha 的，这里照同样的顺序烘进去。

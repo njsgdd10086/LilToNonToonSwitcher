@@ -490,7 +490,7 @@ namespace NonToonSwitcher
             return ShaderUtility.HasProperty(shader, direct) ? direct : null;
         }
 
-        private static bool ReadPixels(Texture2D texture, out Color[] pixels, out int width, out int height,
+        internal static bool ReadPixels(Texture2D texture, out Color[] pixels, out int width, out int height,
             ConversionLog log, string featureName)
         {
             pixels = null;
