@@ -201,7 +201,16 @@ namespace NonToonSwitcher
             // 自发光通道**永远**要写：关闭时写 0。否则 R/G/B 会保持上一版（或默认的 1），
             // 而 phase 里是 `lightColor += sd.mask.rgb / albedo` —— 等于给整张脸加了约 1.1，
             // 实测就是"整张脸爆白"。
-            if (ShaderUtility.HasProperty(lilToonMaterial, "_UseEmission") &&
+            // ------------------------------------------------------------------
+            // 自发光功能已整体移除（用户要求）。
+            //
+            // 原因：唯一能到 shader 的通道是共享遮罩 sd.mask.rgb，而它是**所有模块、所有材质共用**的资源 ——
+            // 把逐材质的自发光写进去会污染全局（实测：身体出现洋红/黄色块；用户验证「删掉 _SharedMask
+            // 画面即正常」）。自建模块的属性又不被 Shader Core 下发，相位里没有逐材质的替代通道。
+            // 因此把自发光整块跳过：不烘贴图、不写通道、不打开开关，画面与"没有自发光"完全一致。
+            // 共享遮罩的 R/G/B 保持常量 0，A 仍承载真正的遮罩给其它模块使用。
+            // ------------------------------------------------------------------
+            if (false && ShaderUtility.HasProperty(lilToonMaterial, "_UseEmission") &&
                 lilToonMaterial.GetFloat("_UseEmission") != 0f)
             {
                 // 自发光：严格照 lilToon 的合成公式（lil_common_frag.hlsl 1819~1861）
