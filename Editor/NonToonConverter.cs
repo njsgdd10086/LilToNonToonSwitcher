@@ -1224,19 +1224,13 @@ namespace NonToonSwitcher
                 return;
             }
 
-            // lilToon 真正的描边开关是**材质属性** _UseOutline：即使源 shader 是 Hidden/lilToonOutline，
-            // 作者把它设成 0 时也不会画描边（实测 Atri_face 1 / Manuka_body 的 _UseOutline 都是 0，
-            // 而画面里的轮廓是贴图自带的，不是描边）。照搬 _OutlineWidth 就会凭空多出一圈硬黑描边。
-            if (ShaderUtility.HasProperty(source, "_UseOutline") && source.GetFloat("_UseOutline") < 0.5f)
-            {
-                var staleWidth = target.GetFloat("_OutlineWidth");
-                if (staleWidth > 0f)
-                {
-                    ShaderUtility.SetFloatValue(target, "_OutlineWidth", 0f);
-                    log.Mapped("描边（lilToon 的 _UseOutline = 0，作者没有开描边）", "_OutlineWidth = 0（不加描边）");
-                }
-                return;
-            }
+            // 注意：**不要**用 lilToon 的 `_UseOutline` 来判断有没有描边。
+            // 实测：该属性在 lilToon 的 shader 代码里**完全没有被引用**（只是 Inspector 上的折叠开关），
+            // 全工程 172 个 lil 材质的 `_UseOutline` 都是 0，但其中带 `Hidden/lilToonOutline` 变体的材质
+            // 在 lil 里**确实有描边**（用户实测反馈：头发描边被我按这个值关掉了）。
+            // 真正决定描边的是 **shader 变体 + `_OutlineWidth`**，所以判定回到"源 shader 名字里有没有 Outline"。
+            // 描边贴图（`_OutlineTex`）与色调校正 NonToon 没有对应功能，只能近似成单一描边色 ——
+            // 这一点由 `_OutlineColor` 直接承接，不再猜测倍数。
 
             var manual = NonToonSwitcherSettings.instance.OutlineWidthFactor;
             var factor = manual * (outlineScale > 0f ? outlineScale : 1f);
