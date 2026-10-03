@@ -8,6 +8,34 @@ namespace NonToonSwitcher
     {
         private const int Priority = 50;
 
+        [MenuItem("Tools/LilToNonToon Switcher/重新生成 NonToon 着色器", false, 60)]
+        private static void RegenerateShaders()
+        {
+            // 着色器核心只有在它认为"模块文件变了"时才重新生成。Unity 有时（尤其是后台运行时）
+            // 不会及时重编译/重生成，导致改了模块相位却看不到效果 —— 这个菜单就是手动强制一次。
+            var regenerated = 0;
+            foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var type = assembly.GetType("NonToonModules.NonToonModuleRegistry", false);
+                if (type == null) continue;
+                var method = type.GetMethod("RegenerateNonToonShader",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Static);
+                if (method != null)
+                {
+                    method.Invoke(null, null);
+                    regenerated++;
+                }
+                break;
+            }
+            UnityEditor.AssetDatabase.Refresh(UnityEditor.ImportAssetOptions.ForceUpdate);
+            UnityEditor.AssetDatabase.ImportAsset("Packages/jp.lilxyzw.nontoon/Shaders/NonToon.scshader",
+                UnityEditor.ImportAssetOptions.ForceUpdate | UnityEditor.ImportAssetOptions.ForceSynchronousImport);
+            Debug.Log(regenerated > 0
+                ? "[LilToNonToon Switcher] 已请求重新生成 NonToon 着色器（含模块相位）。改过模块后请点一次，然后重新转换材质。"
+                : "[LilToNonToon Switcher] 没找到模块注册表（模块包可能没装）—— 只做了资源刷新。");
+        }
+
         [MenuItem("GameObject/LilToNonToon/将选中对象转换为 NonToon %#t", false, Priority)]
         private static void ConvertSelection()
         {
