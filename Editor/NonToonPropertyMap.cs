@@ -393,6 +393,43 @@ namespace NonToonSwitcher
                 log.Mapped("_ShadowColor/_Shadow2ndColor/… → Shade 替换模块", enable + " = 1");
             }, "Shade 替换模块（需要 com.nontoon.modules）");
 
+            // ----- 自发光（emission）-----
+            // NonToon 没有 emission 属性，用自带 Lighten 模块的 As Emission 近似：
+            //   Lighten: lightColor = lerp(lightColor, max(lightColor, _LightBoost), mask[通道])
+            // 也就是"再暗也不低于这个亮度"，配合共享遮罩就得到带蒙版的自发光
+            // （lilToon 原式：col += _EmissionColor.rgb * _EmissionBlend * _EmissionColor.a * 蒙版）。
+            // 蒙版由 NonToonMaskBuilder 把 _EmissionBlendMask 烘进共享遮罩并指向 Lighten 的通道。
+            MapFunc("_EmissionColor", "_jp_lilxyzw_nontoon_lighten_LightBoost", (src, dst, log) =>
+            {
+                if (!ShaderUtility.HasProperty(src, "_UseEmission") || src.GetFloat("_UseEmission") == 0f) return;
+
+                const string prefix = "_jp_lilxyzw_nontoon_lighten_";
+                if (!ShaderUtility.HasProperty(dst, prefix + "LightBoost"))
+                {
+                    log.Unsupported("自发光（当前 NonToon 版本没有 Lighten 模块）");
+                    return;
+                }
+
+                var color = ShaderUtility.HasProperty(src, "_EmissionColor")
+                    ? src.GetColor("_EmissionColor")
+                    : Color.white;
+                var blend = ShaderUtility.HasProperty(src, "_EmissionBlend") ? src.GetFloat("_EmissionBlend") : 1f;
+                // lilToon: emissionBlend = _EmissionBlend * _EmissionColor.a（alpha 就是强度），
+                // 颜色的 HDR 亮度决定辉光有多亮。
+                var intensity = Mathf.Max(color.r, Mathf.Max(color.g, color.b)) * color.a * blend;
+                if (intensity <= 0.001f) return;
+
+                ShaderUtility.SetFloatValue(dst, prefix + "LightBoost", Mathf.Clamp(intensity, 0f, 10f));
+                var asEmission = prefix + "LightBoostAsEmission";
+                if (ShaderUtility.HasProperty(dst, asEmission)) ShaderUtility.SetIntPersistent(dst, asEmission, 1);
+
+                var maskOk = ShaderUtility.HasProperty(src, "_EmissionBlendMask") && src.GetTexture("_EmissionBlendMask") != null;
+                log.Mapped("_EmissionColor（HDR " + color.r.ToString("0.##") + "/" + color.g.ToString("0.##") + "/" + color.b.ToString("0.##")
+                           + " × 强度 " + color.a.ToString("0.##") + "）",
+                    "Light Boost = " + intensity.ToString("0.###") + "，As Emission" +
+                    (maskOk ? "，蒙版烘进 _SharedMask" : "（源没有蒙版贴图 → 整块材质生效）"));
+            }, "自发光（Lighten 模块 As Emission）");
+
             // ----- matcap -----
             // lilToon 的 lilBlendColor：0 = Normal（**直接用 matcap 颜色替换**）、1 = Add、2 = Screen、3 = Multiply。
             // NonToon 只有 Multiply / Add 两个槽，所以 0/1/2 都放到 Add（叠加最接近"替换"），只有真正的
