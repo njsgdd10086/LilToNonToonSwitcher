@@ -583,6 +583,8 @@ namespace NonToonSwitcher
             if (use3) AddWindowStops(stops, border3, blur3);
             stops.Sort();
 
+            var avgAlbedo = AverageAlbedo(material);
+
             var colorKeys = new List<GradientColorKey>();
             var last = float.NaN;
             foreach (var x in stops)
@@ -598,6 +600,18 @@ namespace NonToonSwitcher
                 var rgb = new Color(first.r, first.g, first.b, 1f);
                 if (use2) rgb = Color.Lerp(rgb, secondRgb, Mathf.Clamp01(second.a * (1f - s2)));
                 if (use3) rgb = Color.Lerp(rgb, thirdRgb, Mathf.Clamp01(third.a * (1f - s3)));
+
+                // ★ lilToon 的阴影色是**绝对颜色**（col = lerp(indirectCol, directCol, lns)，
+                //   阴影直接把 albedo 换成 _ShadowColor），而 NonToon 的 Shade 是**乘算**
+                //   （sd.col.rgb *= ramp）。直接乘就会变成 _ShadowColor × albedo = 双重变暗：
+                //   深色材质（头发、深色衣服）会黑得离谱，浅色材质会偏白偏灰。
+                //   所以先把阴影色除以材质的平均基础色，乘回来才等于原色，也就是 lilToon 的 lerp。
+                // 注意：渐变贴图是 RGBA32（会被钳到 1），所以"阴影比 albedo 还亮"的情况做不到，
+                // 这里用 Min(1, ...) 取最接近的近似（= 不再双重变暗）。
+                rgb = new Color(
+                    Mathf.Min(1f, rgb.r / avgAlbedo.r),
+                    Mathf.Min(1f, rgb.g / avgAlbedo.g),
+                    Mathf.Min(1f, rgb.b / avgAlbedo.b), 1f);
 
                 // 受光处是 albedo × 光（NonToon 自己会乘），所以渐变在受光端回到白色；
                 // 混合系数还要过 _ShadowStrength（lilToon 的 lerp(1, s, strength)）
@@ -624,6 +638,39 @@ namespace NonToonSwitcher
         {
             stops.Add(Mathf.Clamp01(border - blur * 0.5f));
             stops.Add(Mathf.Clamp01(border + blur * 0.5f));
+        }
+
+        /// <summary>
+        /// 估算材质的平均基础色（用来把 lilToon 的"绝对阴影色"换算成 NonToon 的乘算系数）。
+        /// 透明像素不参与；读不到贴图就当作白色（等于不做换算）。
+        /// </summary>
+        private static Color AverageAlbedo(Material material)
+        {
+            var texture = ShaderUtility.HasProperty(material, "_MainTex") ? material.GetTexture("_MainTex") : null;
+            if (texture == null) return Color.white;
+
+            Color[] pixels;
+            int width, height;
+            if (!TryReadPixels(texture, out pixels, out width, out height, null, "the base texture")) return Color.white;
+            if (pixels == null || pixels.Length == 0) return Color.white;
+
+            double r = 0, g = 0, b = 0;
+            var count = 0;
+            var step = Mathf.Max(1, pixels.Length / 4096);
+            for (var i = 0; i < pixels.Length; i += step)
+            {
+                var c = pixels[i];
+                if (c.a < 0.5f) continue;
+                r += c.r;
+                g += c.g;
+                b += c.b;
+                count++;
+            }
+            if (count == 0) return Color.white;
+            return new Color(
+                Mathf.Clamp((float)(r / count), 0.05f, 1f),
+                Mathf.Clamp((float)(g / count), 0.05f, 1f),
+                Mathf.Clamp((float)(b / count), 0.05f, 1f));
         }
 
         /// <summary>lilToon 的 <c>lilTooningNoSaturateScale(value, border, blur)</c>：过渡窗口 [border ± blur/2]。</summary>
