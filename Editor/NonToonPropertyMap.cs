@@ -382,14 +382,10 @@ namespace NonToonSwitcher
                 dst.EnableKeyword(key + "_1");
                 dst.DisableKeyword(key + "_0");
 
-                // 关掉 NonToon 自带的 Shade 渐变，避免和模块叠加两次
-                foreach (var shadeIndex in new[] { "_jp_lilxyzw_nontoon_shade_ShadeGradientIndex", "_ShadeGradientIndex" })
-                {
-                    if (!ShaderUtility.HasProperty(dst, shadeIndex)) continue;
-                    ShaderUtility.SetIntPersistent(dst, shadeIndex, -1);
-                    log.Mapped("Shade 渐变改为 -1", "由 Shade 替换模块接管（避免叠加两次）");
-                    break;
-                }
+                // 注意：这里**不要**把 Shade 渐变索引设成 -1。
+                // ShadeReplace 模块现在只负责"补回丢失的主光"，不做明暗；NonToon 自带的 Shade 渐变
+                // 才是负责阴影分层的（转换器会把 lilToon 的阴影色烘成渐变并写入正确的索引）。
+                // 之前在这关掉它，材质就只剩光照、中间调被冲白（实测衣服发白发平）。
                 log.Mapped("_ShadowColor/_Shadow2ndColor/… → Shade 替换模块", enable + " = 1");
             }, "Shade 替换模块（需要 com.nontoon.modules）");
 
