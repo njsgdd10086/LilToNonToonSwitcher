@@ -318,14 +318,20 @@ namespace NonToonSwitcher
                 // 默认 0.25：强度扫描对照源 lilToon 后选的（0 = 平得像塑料，0.5 偏强，1.0 出现刺眼噪点）
                 if (strength != null) ShaderUtility.SetFloatValue(dst, strength, 0.25f);
 
+                // **不自动启用**这个模块（只把参数准备好）。原因：它属于我们自己加的模块，而实测
+                // Shader Core 不会把我们模块的属性下发给 shader —— 相位里读到的强度/遮罩恒为默认值，
+                // 于是会在身上画出不受控的色块（实测 shinano 的服装出现洋红块 + 肩部白块）。
+                // 需要时请在菜单「Tools/NonToon 模块/勾选：织物 / 法线细节（Fabric）」手动开启，
+                // 并自行确认效果。
                 var enable = FabricModuleInstaller.FindPropertyName(shader, "Enable");
                 if (enable != null)
                 {
-                    ShaderUtility.SetIntPersistent(dst, enable, 1);
+                    ShaderUtility.SetIntPersistent(dst, enable, 0);
                     var key = enable.ToUpperInvariant();
-                    dst.EnableKeyword(key + "_1");
-                    dst.DisableKeyword(key + "_0");
-                    log.Mapped("_BumpMap → 织物法线模块", enable + " = 1");
+                    dst.EnableKeyword(key + "_0");
+                    dst.DisableKeyword(key + "_1");
+                    log.Mapped("_BumpMap → 织物法线模块（参数已写入，模块默认关闭）",
+                        enable + " = 0（需要时可在 Tools/NonToon 模块 里手动开启）");
                 }
             }, "织物/细节法线模块");
 
