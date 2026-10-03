@@ -941,36 +941,12 @@ namespace NonToonSwitcher
                 var parent = FindSwitcherParent(request.Targets);
                 var swapRoot = FindSwapRoot(request.Targets);
 
-                // 同一个 avatar 下已经转换过一次时，把新材质追加到已有的开关里，而不是再建一个。
+                // 每次转换生成**自己的**一个开关：圈一批 → 点一下 → 出一个 _NonToonSwitch。
+                // 圈 abc 出一个、圈 def 再出一个，两个各管自己那批材质，互不干扰。
                 //
-                // 这里**无条件**查找已有的开关：曾经它受设置项 ReuseExistingSwitcher 控制，而那个选项
-                // 一旦被关掉（菜单 Tools/LilToNonToon Switcher/转换时总是新建 _NonToonSwitch），
-                // 每转换一次就会多出一个内容完全相同的 _NonToonSwitch —— 实测同一个 avatar 下并排躺着
-                // 三个，各 15 条一模一样。用户要的行为是「圈一批转一次只出一个」，所以复用不再可关。
-                // 已有的开关不是 MaterialSetter（例如旧的 MaterialSwap 开关）时，AppendToMaterialSetter
-                // 会返回 -1，此时才照旧新建。
-                var reused = false;
-                var existing = FindExistingSwitcher(request.Targets, parent);
-                if (existing != null)
-                {
-                    var added = NonToonSwitcherBuilder.AppendToMaterialSetter(existing, pairs,
-                        request.CreateMenuToggle, request.MenuParameter, result);
-                    if (added >= 0)
-                    {
-                        result.SwitchObject = existing;
-                        result.SwitchReused = true;
-                        result.SwitchEntryCount = added;
-                        if (existing.transform.parent != null) EditorUtility.SetDirty(existing.transform.parent);
-                        EditorUtility.SetDirty(existing);
-                        reused = true;
-                    }
-                    else
-                    {
-                        result.Warnings.RemoveAll(w => w.Contains("已改为新建"));
-                    }
-                }
-
-                if (!reused)
+                // 曾经这里会去找同一个 avatar 下已有的开关并"追加"进去（还有一个"总是新建"的菜单开关
+                // 控制它），结果是要么每次多出一个、要么不同批次被塞进同一个开关 —— 都不是用户要的
+                // 行为。现在固定为：一次转换 = 一个新开关。
                 {
                     var switcher = NonToonSwitcherBuilder.Build(parent, swapRoot, pairs,
                         request.CreateMenuToggle, request.MenuParameter, request.MenuLabel,
