@@ -409,9 +409,17 @@ namespace NonToonSwitcher
                 }
 
                 var color = ShaderUtility.HasProperty(src, "_EmissionColor") ? src.GetColor("_EmissionColor") : Color.white;
-                var blend = ShaderUtility.HasProperty(src, "_EmissionBlend") ? src.GetFloat(src.HasProperty("_EmissionBlend") ? "_EmissionBlend" : "_EmissionBlend") : 1f;
+                var blend = ShaderUtility.HasProperty(src, "_EmissionBlend") ? src.GetFloat("_EmissionBlend") : 1f;
+                // lilToon 2.x：_EmissionMainStrength 决定"自发光有多少作用到主颜色"。
+                // 实测（Atri_face 1：_UseEmission=1、_EmissionColor=0.45、_EmissionBlend=1、模式=加算，
+                // 但 _EmissionMainStrength=0）：把 lil 自己的 _UseEmission 关掉，渲染出来只差 0.002 ——
+                // 也就是这个材质在 lilToon 下**几乎不发光**。之前漏了这个系数，无脑加 0.45，
+                // 整张脸被冲白（实测暖度 R-B 从 0.067 掉到 0.006），也就是用户说的"发白蒙脸"。
+                var mainStrength = ShaderUtility.HasProperty(src, "_EmissionMainStrength")
+                    ? Mathf.Clamp01(src.GetFloat("_EmissionMainStrength"))
+                    : 1f;
                 // lilToon: emissionBlend = _EmissionBlend * _EmissionColor.a（alpha 就是强度）
-                var strength = blend * color.a;
+                var strength = blend * color.a * mainStrength;
                 if (strength <= 0.001f) return;
 
                 // 颜色里的 HDR 亮度乘进去（模块的 _EmissionColor 是普通颜色，避免 HDR 在材质上被夹掉）
@@ -422,11 +430,12 @@ namespace NonToonSwitcher
                 dst.SetColor(colorProperty, normalized);
                 ShaderUtility.SetFloatValue(dst, strengthProperty, Mathf.Clamp(peak * strength, 0f, 8f));
 
-                var maskOk = ShaderUtility.HasProperty(src, "_EmissionBlendMask") && src.GetTexture("_EmissionBlendMask") != null;
+                var maskOk = (ShaderUtility.HasProperty(src, "_EmissionMap") && src.GetTexture("_EmissionMap") != null) ||
+                             (ShaderUtility.HasProperty(src, "_EmissionBlendMask") && src.GetTexture("_EmissionBlendMask") != null);
                 log.Mapped("_EmissionColor（HDR " + color.r.ToString("0.##") + "/" + color.g.ToString("0.##") + "/" + color.b.ToString("0.##")
-                           + " × 强度 " + color.a.ToString("0.##") + "）",
+                           + " × 强度 " + color.a.ToString("0.##") + " × 主色强度 " + mainStrength.ToString("0.##") + "）",
                     "自发光 = " + (peak * strength).ToString("0.###") + "（加算，由 ShadeReplace 模块实现）" +
-                    (maskOk ? "，蒙版烘进 _SharedMask 并指向 Lighten… 见 EmissionMaskChannel" : "（源没有蒙版贴图 → 整块材质生效）"));
+                    (maskOk ? "，形状/蒙版烘进 _SharedMask 见 EmissionMaskChannel" : "（源没有发光贴图 → 整块材质生效）"));
             }, "自发光（ShadeReplace 模块）");
 
             // 自发光蒙版走共享遮罩，由 NonToonMaskBuilder 的 MaskSource（ModuleKeyword = "Emission"）负责
