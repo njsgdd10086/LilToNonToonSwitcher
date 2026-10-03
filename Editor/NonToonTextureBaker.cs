@@ -639,7 +639,7 @@ namespace NonToonSwitcher
                 // 但对比跨度偏小 —— 我们 暗25%=0.502 / 亮25%=0.832（跨度 0.330），lil 是 0.443 / 0.887（0.444）。
                 // 也就是暗部不够暗、亮部不够亮。这里把色带的暗端按 0.78 收一点（x=1 处不动），
                 // 让跨度回到 lil 的量级；亮端受 lightColor 上限约束，靠主光补正那条一起抬。
-                var darkEnd = Mathf.Lerp(0.78f, 1f, x);
+                var darkEnd = Mathf.Lerp(0.70f, 1f, x);
                 rgb = new Color(rgb.r * darkEnd, rgb.g * darkEnd, rgb.b * darkEnd, 1f);
 
                 var mix = Mathf.Lerp(1f, s1, strength);
