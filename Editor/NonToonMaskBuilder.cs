@@ -22,6 +22,8 @@ namespace NonToonSwitcher
             public string FeatureName;
             public bool RequireToggle;
             public string ToggleProperty;
+            /// <summary>源材质上有这个非空贴图时跳过本项（用于让 _EmissionMap 优先于 _EmissionBlendMask）。</summary>
+            public string SkipIfPropertyPresent;
         }
 
         public static void Bake(Material lilToonMaterial, Material nonToonMaterial, string folder, ConversionLog log)
@@ -57,10 +59,16 @@ namespace NonToonSwitcher
                 new MaskSource { LilToonProperty = "_MatCap2ndBlendMask", ModuleKeyword = matCap2ndModule, FeatureName = "2nd matcap mask",
                                  RequireToggle = true, ToggleProperty = "_UseMatCap2nd" },
                 new MaskSource { LilToonProperty = "_HairSpecularMask", ModuleKeyword = "HairSpecular", FeatureName = "hair specular mask" },
-                // 自发光蒙版：NonToon 没有 emission 属性，我们用 ShadeReplace 模块的加算自发光近似，
-                // 它的蒙版读共享遮罩的 _EmissionMaskChannel 通道 —— 所以这里按普通遮罩烘进去。
-                new MaskSource { LilToonProperty = "_EmissionBlendMask", ModuleKeyword = "Emission", FeatureName = "emission mask",
+                // 自发光：NonToon 没有 emission 属性，我们用 ShadeReplace 模块的加算自发光近似，
+                // 它按共享遮罩的 _EmissionMaskChannel 通道决定"哪里发光"。
+                // lilToon 的 emission = _EmissionColor × _EmissionMap × _EmissionBlendMask，
+                // 两张贴图里 _EmissionMap 决定形状（例如只让眼睛发光），所以它优先；
+                // 之前漏了 _EmissionMap，结果整张脸都被加了自发光 —— 实测就是"发白蒙脸"。
+                new MaskSource { LilToonProperty = "_EmissionMap", ModuleKeyword = "Emission", FeatureName = "emission map",
                                  RequireToggle = true, ToggleProperty = "_UseEmission" },
+                new MaskSource { LilToonProperty = "_EmissionBlendMask", ModuleKeyword = "Emission", FeatureName = "emission mask",
+                                 RequireToggle = true, ToggleProperty = "_UseEmission",
+                                 SkipIfPropertyPresent = "_EmissionMap" },
             };
 
             Color[] pixels = null;
@@ -78,6 +86,14 @@ namespace NonToonSwitcher
                 if (!ShaderUtility.HasProperty(lilToonMaterial, source.LilToonProperty)) continue;
                 if (source.RequireToggle && ShaderUtility.HasProperty(lilToonMaterial, source.ToggleProperty) &&
                     lilToonMaterial.GetFloat(source.ToggleProperty) == 0f) continue;
+                // 优先级：源上已经有更高优先级的贴图时跳过本项（_EmissionMap 优先于 _EmissionBlendMask）
+                if (!string.IsNullOrEmpty(source.SkipIfPropertyPresent) &&
+                    ShaderUtility.HasProperty(lilToonMaterial, source.SkipIfPropertyPresent) &&
+                    lilToonMaterial.GetTexture(source.SkipIfPropertyPresent) != null)
+                {
+                    log.Mapped(source.FeatureName + "（源用 " + source.SkipIfPropertyPresent + "，本项跳过）", "不改共享遮罩");
+                    continue;
+                }
 
                 // lilToon 的透明遮罩是改 alpha 的，NonToon 的共享遮罩改不了 alpha ——
                 // 它的效果已经由贴图烘焙器写进基础贴图的 Alpha 了，这里不用再占一个通道。
