@@ -267,6 +267,7 @@ namespace NonToonSwitcher
             var linearWork = PlayerSettings.colorSpace == ColorSpace.Linear && sourceIsSrgb;
 
             var hdrClipped = false;
+            var toneCompensated = false;
             for (var i = 0; i < pixels.Length; i++)
             {
                 var pixel = pixels[i];
@@ -289,6 +290,19 @@ namespace NonToonSwitcher
 
                 // 最后才乘主色（含 alpha），顺序和 lilToon 的 `fd.col *= _Color` 一致
                 rgb = new Vector3(rgb.x * tint.r, rgb.y * tint.g, rgb.z * tint.b);
+                // 色调补偿（高级选项）：把 NonToon 与 lilToon 着色链路的差异补在贴图上，
+                // 而不是写成 shader 魔数。三项都是 1 时完全跳过，等于最忠实档。
+                var compGamma = NonToonSwitcherSettings.instance.ToneCurveGamma;
+                var compGain = NonToonSwitcherSettings.instance.ToneCurveGain;
+                var compExposure = NonToonSwitcherSettings.instance.BaseExposure;
+                if (!Mathf.Approximately(compGamma, 1f) || !Mathf.Approximately(compGain, 1f) || !Mathf.Approximately(compExposure, 1f))
+                {
+                    rgb = new Vector3(
+                        Mathf.Pow(Mathf.Max(0f, rgb.x), compGamma) * compGain * compExposure,
+                        Mathf.Pow(Mathf.Max(0f, rgb.y), compGamma) * compGain * compExposure,
+                        Mathf.Pow(Mathf.Max(0f, rgb.z), compGamma) * compGain * compExposure);
+                    toneCompensated = true;
+                }
                 if (rgb.x > 1f || rgb.y > 1f || rgb.z > 1f) hdrClipped = true;
                 if (linearWork) rgb = new Vector3(LinearToSrgb(rgb.x), LinearToSrgb(rgb.y), LinearToSrgb(rgb.z));
 
@@ -366,6 +380,10 @@ namespace NonToonSwitcher
                 what.Add("透明遮罩（模式 " + alphaMaskMode + "，scale " + alphaMaskScale.ToString("0.###") +
                          " / value " + alphaMaskValue.ToString("0.###") +
                          (alphaMaskPixels == null ? "，未挂贴图按白=1" : "") + "）→ Alpha");
+            if (toneCompensated)
+                what.Add("色调补偿（gamma " + NonToonSwitcherSettings.instance.ToneCurveGamma.ToString("0.###") +
+                         " / 增益 " + NonToonSwitcherSettings.instance.ToneCurveGain.ToString("0.###") +
+                         " / 曝光 " + NonToonSwitcherSettings.instance.BaseExposure.ToString("0.###") + "，可在高级选项里改回 1）");
             log.Mapped("_MainTex + " + string.Join(" + ", what.ToArray()), "_BaseTexture（已烘焙 PNG）");
 
             if (hdrClipped)
@@ -932,3 +950,6 @@ namespace NonToonSwitcher
 
 
 // touch r29
+
+// touch r31b
+

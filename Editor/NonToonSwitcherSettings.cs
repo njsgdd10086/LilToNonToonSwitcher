@@ -39,6 +39,15 @@ namespace NonToonSwitcher
         [SerializeField] private float gradientWindowScale = 1f;
         [SerializeField] private float gradientDarkEnd = 1f;
 
+        // ---- 色调补偿（高级）----
+        // NonToon 的着色链路与 lilToon 并不等价（NonToon 的 Shade 是乘算、光也积得偏少），
+        // 所以"忠实照搬"会整体偏暗偏平。这三项把补偿做在**烘焙出来的贴图**上，
+        // 而不是写成 shader 里的魔数（自建模块的属性到不了 shader，写进去就没法调了）。
+        // 全部设为 1 即"不做任何补偿"，是最忠实的档位。
+        [SerializeField] private float baseExposure = 1f;
+        [SerializeField] private float toneCurveGamma = 1f;
+        [SerializeField] private float toneCurveGain = 1f;
+
         /// <summary>lilToon 描边宽度贴图的补偿：描边整体后移 = 描边宽度 × 0.01 × 这个倍数。</summary>
         public const float DefaultOutlineZOffsetFactor = 1f;
 
@@ -72,6 +81,27 @@ namespace NonToonSwitcher
         {
             get { return gradientDarkEnd <= 0f ? 1f : gradientDarkEnd; }
             set { gradientDarkEnd = Mathf.Clamp(value, 0.2f, 1f); SaveSettings(); }
+        }
+
+        /// <summary>烘焙贴图时的整体曝光倍数。1 = 不补偿（最忠实）。</summary>
+        public float BaseExposure
+        {
+            get { return baseExposure <= 0f ? 1f : baseExposure; }
+            set { baseExposure = Mathf.Clamp(value, 0.2f, 4f); SaveSettings(); }
+        }
+
+        /// <summary>色调曲线 gamma：>1 压暗中低段（1 = 不补偿）。</summary>
+        public float ToneCurveGamma
+        {
+            get { return toneCurveGamma <= 0f ? 1f : toneCurveGamma; }
+            set { toneCurveGamma = Mathf.Clamp(value, 0.3f, 3f); SaveSettings(); }
+        }
+
+        /// <summary>色调曲线增益：整体乘数（1 = 不补偿）。</summary>
+        public float ToneCurveGain
+        {
+            get { return toneCurveGain <= 0f ? 1f : toneCurveGain; }
+            set { toneCurveGain = Mathf.Clamp(value, 0.2f, 4f); SaveSettings(); }
         }
 
         public bool CreateMenuToggle
