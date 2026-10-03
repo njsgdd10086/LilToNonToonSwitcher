@@ -584,7 +584,10 @@ namespace NonToonSwitcher
                     if (field == null) continue;
                     var param = field.GetValue(importer);
                     var paramType = param.GetType();
-                    paramType.GetField("tex", flags).SetValue(param, emission);
+                    // R/G/B 不挂贴图（常量 0）：共享遮罩是各方共用资源，一旦这里非零，
+                    // ShadeReplace 的 postpixel 加算就会给所有材质加色（用户实测：删掉
+                    // _SharedMask 画面即恢复正常，身体出现洋红/黄色块就是它造成的）。
+                    paramType.GetField("tex", flags).SetValue(param, null);
                     var modeField = paramType.GetField("mode", flags);
                     modeField.SetValue(param, Enum.Parse(modeField.FieldType, names[i]));
                     paramType.GetField("fallbackValue", flags).SetValue(param, 0f);
