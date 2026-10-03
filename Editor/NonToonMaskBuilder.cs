@@ -303,10 +303,15 @@ namespace NonToonSwitcher
                 WriteTexture(emissionPixels, emissionWidth, emissionHeight, emPath);
                 AssetDatabase.ImportAsset(emPath, ImportAssetOptions.ForceUpdate);
                 var emAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(emPath);
-                if (emAsset != null && ShaderUtility.HasProperty(nonToonMaterial, "_EmissionTexture"))
+                var emSlot = FabricModuleInstaller.FindModuleProperty(nonToonMaterial.shader, "shadereplace", "EmissionTexture");
+                if (emAsset != null && emSlot != null)
                 {
-                    nonToonMaterial.SetTexture("_EmissionTexture", emAsset);
-                    log.Mapped("自发光贴图", "_EmissionTexture（" + emAsset.name + "）");
+                    nonToonMaterial.SetTexture(emSlot, emAsset);
+                    log.Mapped("自发光贴图", emSlot + "（" + emAsset.name + "）");
+                }
+                else if (emAsset != null)
+                {
+                    log.Warn("找不到模块的 EmissionTexture 属性，自发光贴图没有接上。");
                 }
             }
 
@@ -491,4 +496,9 @@ namespace NonToonSwitcher
 }
 
 // touch 639266595220365095
+
+
+// touch 639266605217587032
+
+// touch 639266605953102278
 
