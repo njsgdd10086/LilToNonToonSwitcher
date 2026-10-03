@@ -180,6 +180,46 @@ namespace NonToonSwitcher
                         "所以转换时会自动按「使用该材质的对象世界缩放」折算；这个倍数是在那之上再乘一次。\n" +
                         "描边偏粗就调小（0.5 上下），偏细就调大。"),
                     settings.OutlineWidthFactor, 0f, 2f);
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("色调标定（逐项可调，改完重新转换生效）", EditorStyles.miniBoldLabel);
+                EditorGUILayout.HelpBox(
+                    "NonToon 的着色链路和 lilToon 并不等价（NonToon 的 Shade 是乘算、主光也积得偏少），" +
+                    "所以「完全照搬 lilToon 参数」会整体偏暗、明暗偏平。下面这几项就是把这点差异补回来。" +
+                    "出厂默认值是对着 lilToon 的实际渲染做四分位实测标定得到的，不是随手填的；" +
+                    "全部改成 1 就是最忠实档（不补任何东西），适合与 lilToon 做逐像素对照。",
+                    MessageType.Info);
+                settings.GradientWindowScale = EditorGUILayout.Slider(
+                    new GUIContent("色带过渡窗口倍数",
+                        "「受光 → 阴影」的过渡窗口比 lilToon 宽多少。1 = 完全照搬 lilToon 的 (border ± blur/2)；" +
+                        "大于 1 会让暗部更早进入、中间调变暗。实测为 1 时色带接近水平线（0.447→1），衣服看起来比 lil 平。"),
+                    settings.GradientWindowScale, 0.1f, 8f);
+                settings.GradientDarkEnd = EditorGUILayout.Slider(
+                    new GUIContent("色带暗端收缩",
+                        "色带最暗端额外压深的系数。1 = 不压；越小暗部越深。实测 0.7 时暗端约 0.20。"),
+                    settings.GradientDarkEnd, 0.2f, 1f);
+                settings.BaseExposure = EditorGUILayout.Slider(
+                    new GUIContent("烘焙曝光",
+                        "烘焙基础贴图时的整体曝光倍数，补偿主光差异（NonToon 只积到直接光的一部分）。1 = 不补偿。"),
+                    settings.BaseExposure, 0.2f, 4f);
+                settings.ToneCurveGamma = EditorGUILayout.Slider(
+                    new GUIContent("色调 gamma",
+                        "烘焙贴图时套一条 gamma 曲线：大于 1 压暗中低段、小于 1 提亮。1 = 不用曲线。"),
+                    settings.ToneCurveGamma, 0.3f, 3f);
+                settings.ToneCurveGain = EditorGUILayout.Slider(
+                    new GUIContent("色调增益",
+                        "配合 gamma 的整体乘数（先 gamma 再乘它）。1 = 不乘。"),
+                    settings.ToneCurveGain, 0.2f, 4f);
+                if (GUILayout.Button("恢复最忠实档（以上全部设为 1）"))
+                {
+                    settings.GradientWindowScale = 1f;
+                    settings.GradientDarkEnd = 1f;
+                    settings.BaseExposure = 1f;
+                    settings.ToneCurveGamma = 1f;
+                    settings.ToneCurveGain = 1f;
+                    GUI.FocusControl(null);
+                }
+                EditorGUILayout.Space();
                 settings.LogToConsole = EditorGUILayout.Toggle("输出日志到 Console", settings.LogToConsole);
                 EditorGUI.indentLevel--;
             }
