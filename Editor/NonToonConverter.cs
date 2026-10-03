@@ -1224,6 +1224,20 @@ namespace NonToonSwitcher
                 return;
             }
 
+            // lilToon 真正的描边开关是**材质属性** _UseOutline：即使源 shader 是 Hidden/lilToonOutline，
+            // 作者把它设成 0 时也不会画描边（实测 Atri_face 1 / Manuka_body 的 _UseOutline 都是 0，
+            // 而画面里的轮廓是贴图自带的，不是描边）。照搬 _OutlineWidth 就会凭空多出一圈硬黑描边。
+            if (ShaderUtility.HasProperty(source, "_UseOutline") && source.GetFloat("_UseOutline") < 0.5f)
+            {
+                var staleWidth = target.GetFloat("_OutlineWidth");
+                if (staleWidth > 0f)
+                {
+                    ShaderUtility.SetFloatValue(target, "_OutlineWidth", 0f);
+                    log.Mapped("描边（lilToon 的 _UseOutline = 0，作者没有开描边）", "_OutlineWidth = 0（不加描边）");
+                }
+                return;
+            }
+
             var manual = NonToonSwitcherSettings.instance.OutlineWidthFactor;
             var factor = manual * (outlineScale > 0f ? outlineScale : 1f);
             if (Mathf.Approximately(factor, 1f)) return;
@@ -1472,3 +1486,6 @@ namespace NonToonSwitcher
         }
     }
 }
+
+// touch 639266624256169435
+
