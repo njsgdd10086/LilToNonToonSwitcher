@@ -74,6 +74,7 @@ namespace NonToonSwitcher
             Color[] pixels = null;
             var width = 0;
             var height = 0;
+            var emissionStrengthForKeyword = 0f;
             Color[] emissionPixels = null;
             var emissionWidth = 0;
             var emissionHeight = 0;
@@ -222,6 +223,7 @@ namespace NonToonSwitcher
                     ? Mathf.Clamp01(lilToonMaterial.GetFloat("_EmissionMainStrength"))
                     : 1f;
                 var emissionStrength = emissionBlend * emissionColor.a * emissionMainStrength;
+                emissionStrengthForKeyword = emissionStrength;
 
                 if (emissionStrength > 0.001f && emissionShape != null &&
                     ReadPixels(emissionShape, out var shapePixels, out var shapeWidth, out var shapeHeight, log, "自发光蒙版"))                {
@@ -330,6 +332,18 @@ namespace NonToonSwitcher
             }
 
             nonToonMaterial.SetTexture("_SharedMask", asset);
+
+            // 自发光用关键字做逐材质门槛（实测这是 Shader Core 下唯一能进 shader 的开关）。
+            // 只有真的烘出了自发光的材质才打开；否则没有 .scmask 的材质会采样到遮罩默认白，加算 +2 直接爆白。
+            var emissionOnSlot = FabricModuleInstaller.FindModuleProperty(nonToonMaterial.shader, "shadereplace", "EmissionOn");
+            if (emissionOnSlot != null)
+            {
+                var hasEmission = emissionStrengthForKeyword > 0.001f;
+                ShaderUtility.SetIntValue(nonToonMaterial, emissionOnSlot, hasEmission ? 1 : 0);
+                nonToonMaterial.EnableKeyword(emissionOnSlot.ToUpperInvariant() + (hasEmission ? "_1" : "_0"));
+                nonToonMaterial.DisableKeyword(emissionOnSlot.ToUpperInvariant() + (hasEmission ? "_0" : "_1"));
+                log.Mapped("自发光开关", emissionOnSlot + " = " + (hasEmission ? "开" : "关"));
+            }
             log.Mapped("lilToon 遮罩（" + string.Join("、", used) + "）", "_SharedMask");
 
             // 统一写通道 + 读回校验（写不进就明确报警，免得又变成"金饰消失"这种哑巴问题）
@@ -497,4 +511,7 @@ namespace NonToonSwitcher
 
 
 // touch 639266612783602486
+
+
+// touch 639266615773377304
 
