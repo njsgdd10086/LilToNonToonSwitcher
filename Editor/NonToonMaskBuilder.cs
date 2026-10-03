@@ -79,13 +79,6 @@ namespace NonToonSwitcher
             var emissionHeight = 0;
             var used = new List<string>();
             var channelOwner = new string[4];
-            // 自发光专用：R/G/B 三个通道留给"形状 × 强度 × 颜色"（见下面的 emission 段落），
-            // 其它模块的遮罩继续用它们默认的 A 通道。这样做的原因是 Shader Core 里模块的 float/color
-            // 属性根本送不进 shader（实测 _EmissionStrength / _LightBoost / ShadeGradientIndex 全部恒为 0，
-            // 而关键字与贴图都正常），所以自发光只能靠贴图携带数值。
-            channelOwner[0] = "__emission";
-            channelOwner[1] = "__emission";
-            channelOwner[2] = "__emission";
             // 关键：NonToon 所有自带模块的 Mask Channel 默认都是 A(3)，而共享遮罩是**一张**贴图、
             // 每个模块按自己的通道号去读。如果我们的遮罩占了 A，就等于把 Shade / MatCap / 边缘光 /
             // 发丝高光…全部模块的遮罩一起改掉了 —— 实测 shinano 的脸因此整片变白。
@@ -501,4 +494,7 @@ namespace NonToonSwitcher
 // touch 639266605217587032
 
 // touch 639266605953102278
+
+
+// touch 639266612783602486
 
