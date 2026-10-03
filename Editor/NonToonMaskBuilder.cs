@@ -204,11 +204,26 @@ namespace NonToonSwitcher
             if (ShaderUtility.HasProperty(lilToonMaterial, "_UseEmission") &&
                 lilToonMaterial.GetFloat("_UseEmission") != 0f)
             {
-                var emissionShape = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionMap")
+                // 自发光：严格照 lilToon 的合成公式（lil_common_frag.hlsl 1819~1861）
+                //
+                //   emissionColor  = _EmissionColor                       (RGBA)
+                //   emissionColor *= _EmissionMap                         (取 **RGBA**，不是只取 alpha)
+                //   emissionColor *= _EmissionBlendMask                   (只在材质启用 LIL_FEATURE_EmissionBlendMask 时)
+                //   emissionColor.rgb = lerp(emissionColor.rgb, emissionColor.rgb * albedo, _EmissionMainStrength)
+                //   blend = _EmissionBlend * emissionColor.a
+                //
+                // 这里最容易搞错的是 `_EmissionMainStrength`：它**不是强度倍数**，而是"朝『自发光 × 基础色』
+                // 插值"的权重。之前按强度倍数处理，导致 _EmissionMainStrength=0 的材质直接不发光（Atri），
+                // 而 =1 的材质整片平加、把脸冲爆（Shinano 实测：整脸爆白）。另外形状必须来自 _EmissionBlendMask，
+                // 不是 _EmissionMap 的 alpha —— Shinano 的 _EmissionMap alpha 整张都是 1，直接用会把整脸点亮。
+                var emissionMap = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionMap")
                     ? lilToonMaterial.GetTexture("_EmissionMap") as Texture2D
                     : null;
-                if (emissionShape == null && ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlendMask"))
-                    emissionShape = lilToonMaterial.GetTexture("_EmissionBlendMask") as Texture2D;
+                var emissionMask = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlendMask")
+                    ? lilToonMaterial.GetTexture("_EmissionBlendMask") as Texture2D
+                    : null;
+                var usesEmissionMask = emissionMask != null &&
+                    System.Array.IndexOf(lilToonMaterial.shaderKeywords, "LIL_FEATURE_EmissionBlendMask") >= 0;
 
                 var emissionColor = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionColor")
                     ? lilToonMaterial.GetColor("_EmissionColor")
@@ -216,21 +231,23 @@ namespace NonToonSwitcher
                 var emissionBlend = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlend")
                     ? lilToonMaterial.GetFloat("_EmissionBlend")
                     : 1f;
-                // lilToon 2.x: _EmissionMainStrength 决定"自发光有多少作用到主颜色"。
-                // 这份模型里几乎每个材质都是 0（作者只拿它做荧光/次要色），所以必须尊重它 ——
-                // 不乘它的话脸会被 +0.45 直接冲爆（实测：整张脸爆白、嘴部一团洋红）。
                 var emissionMainStrength = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionMainStrength")
                     ? Mathf.Clamp01(lilToonMaterial.GetFloat("_EmissionMainStrength"))
-                    : 1f;
-                var emissionStrength = emissionBlend * emissionColor.a * emissionMainStrength;
-                emissionStrengthForKeyword = emissionStrength;
+                    : 0f;
 
-                if (emissionStrength > 0.001f && emissionShape != null &&
-                    ReadPixels(emissionShape, out var shapePixels, out var shapeWidth, out var shapeHeight, log, "自发光蒙版"))                {
+                if (emissionMap != null &&
+                    ReadPixels(emissionMap, out var mapPixels, out var mapWidth, out var mapHeight, log, "自发光贴图"))
+                {
+                    Color[] maskPixels2 = null;
+                    var maskWidth2 = 0;
+                    var maskHeight2 = 0;
+                    if (usesEmissionMask)
+                        ReadPixels(emissionMask, out maskPixels2, out maskWidth2, out maskHeight2, log, "自发光蒙版");
+
                     if (pixels == null)
                     {
-                        width = shapeWidth;
-                        height = shapeHeight;
+                        width = mapWidth;
+                        height = mapHeight;
                         pixels = new Color[width * height];
                         for (var i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
                     }
@@ -239,26 +256,43 @@ namespace NonToonSwitcher
                     emissionPixels = new Color[width * height];
                     for (var y = 0; y < height; y++)
                     {
-                        var sy = Mathf.Clamp(y * shapeHeight / height, 0, shapeHeight - 1);
+                        var sy = Mathf.Clamp(y * mapHeight / height, 0, mapHeight - 1);
                         for (var x = 0; x < width; x++)
                         {
-                            var sx = Mathf.Clamp(x * shapeWidth / width, 0, shapeWidth - 1);
-                            var value = shapePixels[sy * shapeWidth + sx].a * emissionStrength;
-                            emissionPixels[y * width + x] = new Color(value * emissionColor.r, value * emissionColor.g, value * emissionColor.b, 1f);
+                            var sx = Mathf.Clamp(x * mapWidth / width, 0, mapWidth - 1);
+                            var m = mapPixels[sy * mapWidth + sx];
+                            var em = new Vector3(emissionColor.r * m.r, emissionColor.g * m.g, emissionColor.b * m.b);
+                            if (maskPixels2 != null)
+                            {
+                                var mx = Mathf.Clamp(x * maskWidth2 / width, 0, maskWidth2 - 1);
+                                var my = Mathf.Clamp(y * maskHeight2 / height, 0, maskHeight2 - 1);
+                                var k = maskPixels2[my * maskWidth2 + mx].a;
+                                em = new Vector3(em.x * k, em.y * k, em.z * k);
+                            }
+                            // 朝"自发光 × 基础色"插值（lil: lerp(emission, emission * albedo, _EmissionMainStrength)）
+                            var albedo = pixels[y * width + x];
+                            em = new Vector3(
+                                Mathf.Lerp(em.x, em.x * albedo.r, emissionMainStrength),
+                                Mathf.Lerp(em.y, em.y * albedo.g, emissionMainStrength),
+                                Mathf.Lerp(em.z, em.z * albedo.b, emissionMainStrength));
+                            var value = emissionBlend * m.a;      // lil: _EmissionBlend * emissionColor.a
+                            emissionPixels[y * width + x] = new Color(em.x * value, em.y * value, em.z * value, 1f);
                             var target = pixels[y * width + x];
-                            target.r = value * emissionColor.r;
-                            target.g = value * emissionColor.g;
-                            target.b = value * emissionColor.b;
+                            target.r = em.x * value;
+                            target.g = em.y * value;
+                            target.b = em.z * value;
                             pixels[y * width + x] = target;
                         }
                     }
-                    used.Add("自发光（取 alpha × 强度 × 颜色 → RGB）");
-                    log.Mapped("自发光（_EmissionMap/_EmissionBlendMask 的 alpha × 强度 " +
-                               emissionStrength.ToString("0.###") + " × 颜色）", "写入共享遮罩的 R/G/B 通道");
+                    emissionStrengthForKeyword = 1f;
+                    used.Add("自发光（照 lilToon 公式：颜色 × 贴图RGB × 蒙版A × 混合 × 主色强度插值）");
+                    log.Mapped("自发光（_EmissionMap + " + (usesEmissionMask ? "_EmissionBlendMask" : "无蒙版") +
+                               "，主色强度 " + emissionMainStrength.ToString("0.###") + "，混合 " + emissionBlend.ToString("0.###") + "）",
+                               "写入共享遮罩的 R/G/B 通道");
                 }
                 else
                 {
-                    // 有 _UseEmission 但实际不发光（强度 0 或没有形状贴图）：把 R/G/B 清零
+                    emissionStrengthForKeyword = 0f;
                     if (pixels != null)
                     {
                         for (var i = 0; i < pixels.Length; i++)
@@ -268,16 +302,7 @@ namespace NonToonSwitcher
                             pixels[i] = cleared;
                         }
                     }
-                    log.Mapped("自发光关闭（强度 " + emissionStrength.ToString("0.###") + "）", "共享遮罩 R/G/B 清零（不做加算）");
-                }
-            }
-            else if (pixels != null)
-            {
-                for (var i = 0; i < pixels.Length; i++)
-                {
-                    var cleared = pixels[i];
-                    cleared.r = 0f; cleared.g = 0f; cleared.b = 0f;
-                    pixels[i] = cleared;
+                    log.Mapped("自发光（源没有 _EmissionMap）", "共享遮罩 R/G/B 清零");
                 }
             }
 
