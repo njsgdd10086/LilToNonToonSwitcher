@@ -420,7 +420,15 @@ namespace NonToonSwitcher
                     : 1f;
                 // lilToon: emissionBlend = _EmissionBlend * _EmissionColor.a（alpha 就是强度）
                 var strength = blend * color.a * mainStrength;
-                if (strength <= 0.001f) return;
+                // 不发光时必须把模块的强度清零：重新转换一个原本带自发光的材质时，
+                // 如果这里直接 return，材质上会残留上一次转换写进去的值（实测残留 0.453 → 整脸发白）。
+                if (strength <= 0.001f)
+                {
+                    ShaderUtility.SetFloatValue(dst, strengthProperty, 0f);
+                    log.Mapped("_EmissionColor × 主色强度 " + mainStrength.ToString("0.##"),
+                        "自发光 = 0（lilToon 的 _EmissionMainStrength 为 0，自发光不作用到主颜色）");
+                    return;
+                }
 
                 // 颜色里的 HDR 亮度乘进去（模块的 _EmissionColor 是普通颜色，避免 HDR 在材质上被夹掉）
                 var peak = Mathf.Max(color.r, Mathf.Max(color.g, color.b));
