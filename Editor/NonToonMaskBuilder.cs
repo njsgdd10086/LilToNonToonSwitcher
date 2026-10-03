@@ -236,8 +236,10 @@ namespace NonToonSwitcher
                 var emissionMask = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlendMask")
                     ? lilToonMaterial.GetTexture("_EmissionBlendMask") as Texture2D
                     : null;
-                var usesEmissionMask = emissionMask != null &&
-                    System.Array.IndexOf(lilToonMaterial.shaderKeywords, "LIL_FEATURE_EmissionBlendMask") >= 0;
+                // **不要依赖 shader 关键字**：实测 Shinano_face.mat 的 m_ValidKeywords 是**空的**
+                // （lilToon 2.x 把关键字记在别处/由变体决定），用它做条件会永远不成立 ⇒ 自发光整块跳过
+                // ⇒ 输出 1x1 黑图 ⇒ 眼睛高光丢失。真正的信号是"_UseEmission 开着 + _EmissionBlendMask 挂了贴图"。
+                var usesEmissionMask = emissionMask != null;
                 // 没有 _EmissionMap 时，把蒙版本身当作形状来源（蒙版的 A 就是形状）
                 var shapeTexture = emissionMap != null ? emissionMap : (usesEmissionMask ? emissionMask : null);
                 var shapeIsMask = emissionMap == null && usesEmissionMask;
