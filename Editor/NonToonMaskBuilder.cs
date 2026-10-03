@@ -76,6 +76,13 @@ namespace NonToonSwitcher
             var height = 0;
             var used = new List<string>();
             var channelOwner = new string[4];
+            // 自发光专用：R/G/B 三个通道留给"形状 × 强度 × 颜色"（见下面的 emission 段落），
+            // 其它模块的遮罩继续用它们默认的 A 通道。这样做的原因是 Shader Core 里模块的 float/color
+            // 属性根本送不进 shader（实测 _EmissionStrength / _LightBoost / ShadeGradientIndex 全部恒为 0，
+            // 而关键字与贴图都正常），所以自发光只能靠贴图携带数值。
+            channelOwner[0] = "__emission";
+            channelOwner[1] = "__emission";
+            channelOwner[2] = "__emission";
             // 关键：NonToon 所有自带模块的 Mask Channel 默认都是 A(3)，而共享遮罩是**一张**贴图、
             // 每个模块按自己的通道号去读。如果我们的遮罩占了 A，就等于把 Shade / MatCap / 边缘光 /
             // 发丝高光…全部模块的遮罩一起改掉了 —— 实测 shinano 的脸因此整片变白。
@@ -185,6 +192,59 @@ namespace NonToonSwitcher
                         }
                         pixels[y * width + x] = target;
                     }
+                }
+            }
+
+            // ------------------------------------------------------------------ 自发光（形状 × 强度 × 颜色 → R/G/B）
+            //
+            // lilToon: col += _EmissionColor.rgb * _EmissionColor.a * _EmissionBlend * 蒙版
+            // 形状取自 _EmissionMap（没有就用 _EmissionBlendMask）的 **alpha** —— 实测 Atri_face_em 的
+            // RGB 均值 0.805（几乎全白，用它会把整张脸点亮），而 alpha 均值 0.107（正好是眼睛那一块）。
+            // 数值直接乘进贴图，因为模块的 float 属性送不进 shader（见上面的注释）。
+            if (ShaderUtility.HasProperty(lilToonMaterial, "_UseEmission") &&
+                lilToonMaterial.GetFloat("_UseEmission") != 0f)
+            {
+                var emissionShape = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionMap")
+                    ? lilToonMaterial.GetTexture("_EmissionMap") as Texture2D
+                    : null;
+                if (emissionShape == null && ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlendMask"))
+                    emissionShape = lilToonMaterial.GetTexture("_EmissionBlendMask") as Texture2D;
+
+                var emissionColor = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionColor")
+                    ? lilToonMaterial.GetColor("_EmissionColor")
+                    : Color.white;
+                var emissionBlend = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlend")
+                    ? lilToonMaterial.GetFloat("_EmissionBlend")
+                    : 1f;
+                var emissionStrength = emissionBlend * emissionColor.a;
+
+                if (emissionStrength > 0.001f && emissionShape != null &&
+                    ReadPixels(emissionShape, out var shapePixels, out var shapeWidth, out var shapeHeight, log, "自发光蒙版"))
+                {
+                    if (pixels == null)
+                    {
+                        width = shapeWidth;
+                        height = shapeHeight;
+                        pixels = new Color[width * height];
+                        for (var i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
+                    }
+                    for (var y = 0; y < height; y++)
+                    {
+                        var sy = Mathf.Clamp(y * shapeHeight / height, 0, shapeHeight - 1);
+                        for (var x = 0; x < width; x++)
+                        {
+                            var sx = Mathf.Clamp(x * shapeWidth / width, 0, shapeWidth - 1);
+                            var value = shapePixels[sy * shapeWidth + sx].a * emissionStrength;
+                            var target = pixels[y * width + x];
+                            target.r = value * emissionColor.r;
+                            target.g = value * emissionColor.g;
+                            target.b = value * emissionColor.b;
+                            pixels[y * width + x] = target;
+                        }
+                    }
+                    used.Add("自发光（取 alpha × 强度 × 颜色 → RGB）");
+                    log.Mapped("自发光（_EmissionMap/_EmissionBlendMask 的 alpha × 强度 " +
+                               emissionStrength.ToString("0.###") + " × 颜色）", "写入共享遮罩的 R/G/B 通道");
                 }
             }
 
