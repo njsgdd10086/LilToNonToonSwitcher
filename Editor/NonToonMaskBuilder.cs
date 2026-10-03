@@ -202,15 +202,15 @@ namespace NonToonSwitcher
             // 而 phase 里是 `lightColor += sd.mask.rgb / albedo` —— 等于给整张脸加了约 1.1，
             // 实测就是"整张脸爆白"。
             // ------------------------------------------------------------------
-            // 自发光功能已整体移除（用户要求）。
+            // 自发光：**继续烘焙并输出 <材质名>_Emission.png**（逐材质），但**不写共享遮罩的 R/G/B**。
             //
-            // 原因：唯一能到 shader 的通道是共享遮罩 sd.mask.rgb，而它是**所有模块、所有材质共用**的资源 ——
-            // 把逐材质的自发光写进去会污染全局（实测：身体出现洋红/黄色块；用户验证「删掉 _SharedMask
-            // 画面即正常」）。自建模块的属性又不被 Shader Core 下发，相位里没有逐材质的替代通道。
-            // 因此把自发光整块跳过：不烘贴图、不写通道、不打开开关，画面与"没有自发光"完全一致。
-            // 共享遮罩的 R/G/B 保持常量 0，A 仍承载真正的遮罩给其它模块使用。
+            // 为什么这样分工：共享遮罩是所有模块、所有材质共用的资源，写逐材质数据会污染全局
+            // （实测：身体出现洋红/黄色块；用户验证「删掉 _SharedMask 画面即正常」）。而发射贴图是
+            // 逐材质的，由 NonToonTextureBaker 在烘基础贴图时**逐像素合并**进去 —— 高光按形状精确落位，
+            // 且不影响任何其它材质。实测依据：Shinano_face(_UseEmission=1) 的眼睛高光就来自 _EmissionMap。
+            // 共享遮罩的 R/G/B 仍然保持常量 0，A 承载真正的遮罩。
             // ------------------------------------------------------------------
-            if (false && ShaderUtility.HasProperty(lilToonMaterial, "_UseEmission") &&
+            if (ShaderUtility.HasProperty(lilToonMaterial, "_UseEmission") &&
                 lilToonMaterial.GetFloat("_UseEmission") != 0f)
             {
                 // 自发光：严格照 lilToon 的合成公式（lil_common_frag.hlsl 1819~1861）
