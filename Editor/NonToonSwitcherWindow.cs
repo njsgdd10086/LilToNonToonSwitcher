@@ -210,7 +210,10 @@ namespace NonToonSwitcher
                     new GUIContent("色调增益",
                         "配合 gamma 的整体乘数（先 gamma 再乘它）。1 = 不乘。"),
                     settings.ToneCurveGain, 0.2f, 4f);
-                if (GUILayout.Button("恢复最忠实档（以上全部设为 1）"))
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button(new GUIContent("默认（最忠实）",
+                        "以上全部设为 1：完全照搬 lilToon 的参数，不做任何观感补偿。\n" +
+                        "适合与 lilToon 做逐像素对照，或你想自己从头标定时作为起点。"), GUILayout.Height(24f)))
                 {
                     settings.GradientWindowScale = 1f;
                     settings.GradientDarkEnd = 1f;
@@ -219,6 +222,19 @@ namespace NonToonSwitcher
                     settings.ToneCurveGain = 1f;
                     GUI.FocusControl(null);
                 }
+                if (GUILayout.Button(new GUIContent("设为拟合值",
+                        "填入出厂标定值：色带窗口 2.6 / 暗端 0.70 / 烘焙曝光 1.30 / gamma 1 / 增益 1。\n" +
+                        "这些值是针对 lilToon 的实际渲染做四分位实测拟合出来的，用于补偿 NonToon 与 lilToon\n" +
+                        "着色链路的差异（NonToon 的 Shade 是乘算、主光也积得偏少）。"), GUILayout.Height(24f)))
+                {
+                    settings.GradientWindowScale = 2.6f;
+                    settings.GradientDarkEnd = 0.70f;
+                    settings.BaseExposure = 1.30f;
+                    settings.ToneCurveGamma = 1f;
+                    settings.ToneCurveGain = 1f;
+                    GUI.FocusControl(null);
+                }
+                EditorGUILayout.EndHorizontal();
                 EditorGUILayout.Space();
                 settings.LogToConsole = EditorGUILayout.Toggle("输出日志到 Console", settings.LogToConsole);
                 EditorGUI.indentLevel--;
@@ -327,3 +343,6 @@ namespace NonToonSwitcher
         }
     }
 }
+
+// touch r32b
+
