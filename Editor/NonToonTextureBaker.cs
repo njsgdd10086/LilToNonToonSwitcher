@@ -583,7 +583,7 @@ namespace NonToonSwitcher
             if (use3) AddWindowStops(stops, border3, blur3);
             stops.Sort();
 
-            var avgAlbedo = AverageAlbedo(material);
+            var avgAlbedo = AverageAlbedo(material, log, "_ShadowColor 换算用的");
 
             var colorKeys = new List<GradientColorKey>();
             var last = float.NaN;
@@ -612,6 +612,14 @@ namespace NonToonSwitcher
                     Mathf.Min(1f, rgb.r / avgAlbedo.r),
                     Mathf.Min(1f, rgb.g / avgAlbedo.g),
                     Mathf.Min(1f, rgb.b / avgAlbedo.b), 1f);
+                // 关键点数值写进日志：色带是否"整条发白"看这里最直接
+                if (log != null)
+                {
+                    log.Mapped("色带关键点 x=" + x.ToString("0.###") +
+                               "（阴影色 " + first.r.ToString("0.###") + "/" + first.g.ToString("0.###") + "/" + first.b.ToString("0.###") +
+                               "）", "ramp=" + rgb.r.ToString("0.###") + "/" + rgb.g.ToString("0.###") + "/" + rgb.b.ToString("0.###") +
+                               "（除以平均色 " + avgAlbedo.r.ToString("0.###") + "/" + avgAlbedo.g.ToString("0.###") + "/" + avgAlbedo.b.ToString("0.###") + "）");
+                }
 
                 // 受光处是 albedo × 光（NonToon 自己会乘），所以渐变在受光端回到白色；
                 // 混合系数还要过 _ShadowStrength（lilToon 的 lerp(1, s, strength)）
@@ -644,7 +652,16 @@ namespace NonToonSwitcher
         /// 估算材质的平均基础色（用来把 lilToon 的"绝对阴影色"换算成 NonToon 的乘算系数）。
         /// 透明像素不参与；读不到贴图就当作白色（等于不做换算）。
         /// </summary>
-        private static Color AverageAlbedo(Material material)
+        /// <summary>
+        /// 估算材质的平均基础色（用来把 lilToon 的"绝对阴影色"换算成 NonToon 的乘算系数）。
+        /// 透明像素不参与；读不到贴图就当作白色（等于不做换算）。
+        ///
+        /// 颜色空间很关键：<c>_ShadowColor</c> 来自 Material.GetColor，是 gamma(sRGB) 数值；
+        /// GetPixels 在 Linear 工程里拿到的是线性数值，两者直接相除会得到偏大的商、再被 Min(1,…)
+        /// 钳成 1 —— 表现就是"色带整条发白、材质只剩光照没有阴影分层"。
+        /// 这里把平均色转到 gamma 再返回，和 _ShadowColor 对齐；同时把中间量写进日志方便核对。
+        /// </summary>
+        private static Color AverageAlbedo(Material material, ConversionLog log = null, string label = null)
         {
             var texture = ShaderUtility.HasProperty(material, "_MainTex") ? material.GetTexture("_MainTex") : null;
             if (texture == null) return Color.white;
@@ -667,10 +684,24 @@ namespace NonToonSwitcher
                 count++;
             }
             if (count == 0) return Color.white;
-            return new Color(
+
+            var raw = new Color(
                 Mathf.Clamp((float)(r / count), 0.05f, 1f),
                 Mathf.Clamp((float)(g / count), 0.05f, 1f),
                 Mathf.Clamp((float)(b / count), 0.05f, 1f));
+            // 实测（Linear 工程）：GetPixels 拿到的平均值已经和 _ShadowColor 同一尺度 ——
+            //   Atri_face 1：原样(0.975,0.873,0.837) / 再转 gamma 会是(0.989,0.942,0.925)
+            //   源 _ShadowColor=(1,0.962,0.943) ⇒ 用原样相除得 (1.03,0.95,0.89) 合理；
+            // 再转一次 gamma 会把平均色推高、色带被压暗，所以**不要**转换。
+            var gamma = raw;
+
+            if (log != null && !string.IsNullOrEmpty(label))
+            {
+                log.Mapped(label + " 平均基础色",
+                    "(" + gamma.r.ToString("0.###") + "," + gamma.g.ToString("0.###") + "," + gamma.b.ToString("0.###") + ")" +
+                    "  色彩空间=" + PlayerSettings.colorSpace + "（与 _ShadowColor 同尺度，不再做 gamma 转换）");
+            }
+            return gamma;
         }
 
         /// <summary>lilToon 的 <c>lilTooningNoSaturateScale(value, border, blur)</c>：过渡窗口 [border ± blur/2]。</summary>
