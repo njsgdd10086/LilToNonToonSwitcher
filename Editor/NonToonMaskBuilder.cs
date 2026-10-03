@@ -310,6 +310,22 @@ namespace NonToonSwitcher
                 }
             }
 
+            // 没有遮罩源时也必须产出一张 .scmask：否则 _SharedMask 为空，shader 采样到默认白，
+            // phase 里基于遮罩值的自发光门槛就会把整只模型点亮。R/G/B=自发光（无则 0）、A=常量 1。
+            if (pixels == null)
+            {
+                var scOnlyPath = folder.Replace('\\', '/').TrimEnd('/') + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_NTMask.scmask";
+                var emOnlyPath = folder.Replace('\\', '/').TrimEnd('/') + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
+                if (File.Exists(Path.GetFullPath(emOnlyPath)) && BuildScmask(scOnlyPath, emOnlyPath, null, log))
+                {
+                    var onlyAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(scOnlyPath);
+                    if (onlyAsset != null)
+                    {
+                        nonToonMaterial.SetTexture("_SharedMask", onlyAsset);
+                        log.Mapped("共享遮罩", scOnlyPath + "（无遮罩源：R/G/B=自发光、A=1）");
+                    }
+                }
+            }
             if (pixels == null) return;
 
             var directory = folder.Replace('\\', '/').TrimEnd('/');
@@ -593,4 +609,7 @@ namespace NonToonSwitcher
 
 
 // touch 639266616722474604
+
+
+// touch 639266620481517736
 
