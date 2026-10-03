@@ -387,6 +387,21 @@ namespace NonToonSwitcher
                 // 才是负责阴影分层的（转换器会把 lilToon 的阴影色烘成渐变并写入正确的索引）。
                 // 之前在这关掉它，材质就只剩光照、中间调被冲白（实测衣服发白发平）。
                 log.Mapped("_ShadowColor/_Shadow2ndColor/… → Shade 替换模块", enable + " = 1");
+                // 主光强度：模块默认值从 1 调到了 1.6（分层指标扫描：偏差 0.700 -> 0.382，
+                // 暗部 0.888->0.949、中位 0.913->0.970、亮部 0.680->0.791）。旧材质里存的还是 1，
+                // 只把"仍是旧默认值"的迁移过来，不动用户自己调过的数值。
+                for (var i = 0; i < dst.shader.GetPropertyCount(); i++)
+                {
+                    var name = dst.shader.GetPropertyName(i);
+                    if (name.IndexOf("shadereplace", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    if (!name.EndsWith("MainLightStrength", StringComparison.Ordinal)) continue;
+                    if (Mathf.Abs(dst.GetFloat(name) - 1f) < 0.001f)
+                    {
+                        ShaderUtility.SetFloatValue(dst, name, 1.6f);
+                        log.Mapped("主光强度 1 → 1.6", "与 lilToon 的分层亮度对齐（旧默认值自动迁移）");
+                    }
+                    break;
+                }
             }, "Shade 替换模块（需要 com.nontoon.modules）");
 
             // ----- 自发光（emission）-----
