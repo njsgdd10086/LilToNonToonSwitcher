@@ -306,8 +306,22 @@ namespace NonToonSwitcher
 
             // 每个模块用烘焙时记下的**自己的**切片索引：只有 RimShade 被烘出来时它的索引是 0，
             // 按位置当成 Shade 的索引会让两个模块串位（Shade 采到边缘阴影的渐变、RimShade 反而关掉）。
-            if (shadeProperty != null) ShaderUtility.SetIntPersistent(destination, shadeProperty, shadeIndex);
+            //
+            // 例外：如果材质启用了 com.nontoon.modules.shadereplace（Shade 替换模块），阴影由它接管，
+            // 这里必须把 Shade 渐变关掉（-1），否则会叠加两次。
+            var shadeReplaceEnabled = false;
+            for (var i = 0; i < destination.shader.GetPropertyCount(); i++)
+            {
+                var name = destination.shader.GetPropertyName(i);
+                if (name.IndexOf("shadereplace", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (!name.EndsWith("Enable", StringComparison.Ordinal)) continue;
+                shadeReplaceEnabled = ShaderUtility.ReadSerializedInt(destination, name, 0) != 0;
+                break;
+            }
+            if (shadeProperty != null)
+                ShaderUtility.SetIntPersistent(destination, shadeProperty, shadeReplaceEnabled ? -1 : shadeIndex);
             if (rimShadeProperty != null) ShaderUtility.SetIntPersistent(destination, rimShadeProperty, rimShadeIndex);
+            if (shadeReplaceEnabled) log.Mapped("Shade 渐变索引 = -1", "由 Shade 替换模块接管");
             EditorUtility.SetDirty(destination);
             AssetDatabase.SaveAssets();
         }

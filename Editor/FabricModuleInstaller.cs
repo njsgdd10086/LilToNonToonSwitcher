@@ -79,6 +79,46 @@ namespace NonToonSwitcher
             }
         }
 
+        /// <summary>确保任意模块被勾选（转换时调用；幂等）。模块包没装时返回 false。</summary>
+        public static bool EnsureModule(string moduleId, string label, ConversionLog log)
+        {
+            var type = RegistryType();
+            if (type == null)
+            {
+                if (log != null) log.Warn("没有安装模块包 " + ModulesPackageName + "，" + label + " 不可用。");
+                return false;
+            }
+            var ensure = type.GetMethod("EnsureEnabled", BindingFlags.Public | BindingFlags.Static);
+            if (ensure == null) return false;
+            try
+            {
+                var result = (bool)ensure.Invoke(null, new object[] { moduleId, label });
+                if (result && log != null) log.Mapped(label, "已在 NonToon 模块列表里勾选（" + moduleId + "）");
+                else if (!result && log != null) log.Warn("勾选 " + label + " 失败，可以打开 Tools/NonToon 模块/模块管理… 手动勾选。");
+                return result;
+            }
+            catch (Exception exception)
+            {
+                var inner = exception.InnerException ?? exception;
+                if (log != null) log.Warn("勾选 " + label + " 时出错：" + inner.Message);
+                return false;
+            }
+        }
+
+        /// <summary>按"模块名 + 属性后缀"找模块属性（Shader Core 给属性加包名前缀，例如 _com_nontoon_modules_shadereplace_ShadowColor）。</summary>
+        public static string FindModuleProperty(Shader shader, string moduleToken, string suffix)
+        {
+            if (shader == null) return null;
+            for (var i = 0; i < shader.GetPropertyCount(); i++)
+            {
+                var name = shader.GetPropertyName(i);
+                if (!name.EndsWith(suffix, StringComparison.Ordinal)) continue;
+                if (name.IndexOf(moduleToken, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                return name;
+            }
+            return null;
+        }
+
         /// <summary>
         /// 模块的属性在材质上的实际名字。Shader Core 会给属性加上包名前缀
         /// （例如 `_jp_nontoon_switcher_fabric_Enable`），前缀规则不假定，按"以 suffix 结尾且包含 fabric"找。

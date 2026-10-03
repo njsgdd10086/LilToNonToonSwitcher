@@ -329,6 +329,70 @@ namespace NonToonSwitcher
                 }
             }, "织物/细节法线模块");
 
+            // Shade 替换模块（模块包里的 com.nontoon.modules.shadereplace）：
+            // lilToon 是 col = lerp(indirectCol, directCol, lns)，阴影色是**绝对颜色**，可以比本体还亮
+            // （实测这套模型：衣服阴影 1.41~1.71 倍本体、头发 1.06~1.37 倍）；而 NonToon 的 Shade 是
+            // **乘算**（渐变贴图 RGBA32 + sRGB，上限 1）→ 只能压暗 → 这类材质整体偏暗。
+            // 这个模块在 postpixel 直接做 lilToon 的替换，阴影色走材质属性（不受 0~1 限制）。
+            MapFunc("_ShadowColor", "shadeReplace", (src, dst, log) =>
+            {
+                if (!ShaderUtility.HasProperty(src, "_UseShadow") || src.GetFloat("_UseShadow") == 0f) return;
+                if (!ShaderUtility.HasProperty(src, "_ShadowColor")) return;
+
+                const string token = "shadereplace";
+                if (!FabricModuleInstaller.EnsureModule("com.nontoon.modules.shadereplace", "Shade 替换模块", log)) return;
+
+                var shader = dst.shader;
+                var enable = FabricModuleInstaller.FindModuleProperty(shader, token, "Enable");
+                if (enable == null)
+                {
+                    log.Warn("Shade 替换模块刚登记，NonToon 的 shader 还在重新生成 —— 请稍后再转换一次。");
+                    return;
+                }
+
+                var setColor = new Action<string, string>((lilToonName, suffix) =>
+                {
+                    if (!ShaderUtility.HasProperty(src, lilToonName)) return;
+                    var property = FabricModuleInstaller.FindModuleProperty(shader, token, suffix);
+                    if (property == null) return;
+                    dst.SetColor(property, src.GetColor(lilToonName));
+                });
+                var setFloat = new Action<string, string>((lilToonName, suffix) =>
+                {
+                    if (!ShaderUtility.HasProperty(src, lilToonName)) return;
+                    var property = FabricModuleInstaller.FindModuleProperty(shader, token, suffix);
+                    if (property == null) return;
+                    ShaderUtility.SetFloatValue(dst, property, src.GetFloat(lilToonName));
+                });
+
+                setColor("_ShadowColor", "ShadowColor");
+                setColor("_Shadow2ndColor", "Shadow2ndColor");
+                setColor("_Shadow3rdColor", "Shadow3rdColor");
+                setFloat("_ShadowBorder", "ShadowBorder");
+                setFloat("_ShadowBlur", "ShadowBlur");
+                setFloat("_Shadow2ndBorder", "Shadow2ndBorder");
+                setFloat("_Shadow2ndBlur", "Shadow2ndBlur");
+                setFloat("_Shadow3rdBorder", "Shadow3rdBorder");
+                setFloat("_Shadow3rdBlur", "Shadow3rdBlur");
+                setFloat("_ShadowStrength", "ShadowStrength");
+                setFloat("_ShadowMainStrength", "ShadowMainStrength");
+
+                ShaderUtility.SetIntPersistent(dst, enable, 1);
+                var key = enable.ToUpperInvariant();
+                dst.EnableKeyword(key + "_1");
+                dst.DisableKeyword(key + "_0");
+
+                // 关掉 NonToon 自带的 Shade 渐变，避免和模块叠加两次
+                foreach (var shadeIndex in new[] { "_jp_lilxyzw_nontoon_shade_ShadeGradientIndex", "_ShadeGradientIndex" })
+                {
+                    if (!ShaderUtility.HasProperty(dst, shadeIndex)) continue;
+                    ShaderUtility.SetIntPersistent(dst, shadeIndex, -1);
+                    log.Mapped("Shade 渐变改为 -1", "由 Shade 替换模块接管（避免叠加两次）");
+                    break;
+                }
+                log.Mapped("_ShadowColor/_Shadow2ndColor/… → Shade 替换模块", enable + " = 1");
+            }, "Shade 替换模块（需要 com.nontoon.modules）");
+
             // ----- matcap -----
             // lilToon 的 lilBlendColor：0 = Normal（**直接用 matcap 颜色替换**）、1 = Add、2 = Screen、3 = Multiply。
             // NonToon 只有 Multiply / Add 两个槽，所以 0/1/2 都放到 Add（叠加最接近"替换"），只有真正的
