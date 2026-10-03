@@ -323,6 +323,22 @@ namespace NonToonSwitcher
             WriteTexture(pixels, width, height, maskPath);
             ImportAsMask(maskPath);
 
+            // 共享遮罩带 [SCMask]：Shader Core 会用它自己的 .scmask 生成器产出贴图，直接写 PNG 的引用
+            // 在运行时读不到（实测 shader 里恒为默认白）。所以额外生成一个 .scmask：
+            // R/G/B 取自发光贴图（自发光数据）、A 取上面刚生成的遮罩 PNG（其它模块都读 A）。
+            // 生成失败就保留 PNG 引用，绝不留下空遮罩。
+            var scPath = directory + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_NTMask.scmask";
+            var emPathForMask = directory + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
+            if (File.Exists(Path.GetFullPath(emPathForMask)) && BuildScmask(scPath, emPathForMask, maskPath, log))
+            {
+                var scAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(scPath);
+                if (scAsset != null)
+                {
+                    nonToonMaterial.SetTexture("_SharedMask", scAsset);
+                    log.Mapped("共享遮罩", scPath + "（.scmask：R/G/B=自发光、A=原遮罩）");
+                }
+            }
+
             var asset = AssetDatabase.LoadAssetAtPath<Texture2D>(maskPath);
             if (asset == null)
             {
@@ -499,6 +515,66 @@ namespace NonToonSwitcher
         {
             NonToonTextureBaker.EnsureFolder(folder);
         }
+
+        /// <summary>
+        /// 生成 Shader Core 的 .scmask 遮罩资产（MaskImporter 按通道生成贴图）。
+        /// 注意必须 EditorUtility.SetDirty + WriteImportSettingsIfDirty，否则设置在 SaveAndReimport 时不会序列化。
+        /// </summary>
+        private static bool BuildScmask(string scmaskPath, string emissionPath, string maskPath, ConversionLog log)
+        {
+            try
+            {
+                var full = Path.GetFullPath(scmaskPath);
+                var parent = Path.GetDirectoryName(full);
+                if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+                if (!File.Exists(full)) File.WriteAllText(full, string.Empty);
+                AssetDatabase.ImportAsset(scmaskPath, ImportAssetOptions.ForceUpdate);
+                var importer = AssetImporter.GetAtPath(scmaskPath);
+                if (importer == null) return false;
+                var type = importer.GetType();
+                const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+                var emission = AssetDatabase.LoadAssetAtPath<Texture2D>(emissionPath);
+                var mask = AssetDatabase.LoadAssetAtPath<Texture2D>(maskPath);
+                if (emission == null) return false;
+                var names = new[] { "R", "G", "B" };
+                for (var i = 0; i < names.Length; i++)
+                {
+                    var field = type.GetField(names[i], flags);
+                    if (field == null) continue;
+                    var param = field.GetValue(importer);
+                    var paramType = param.GetType();
+                    paramType.GetField("tex", flags).SetValue(param, emission);
+                    var modeField = paramType.GetField("mode", flags);
+                    modeField.SetValue(param, Enum.Parse(modeField.FieldType, names[i]));
+                    paramType.GetField("fallbackValue", flags).SetValue(param, 0f);
+                    field.SetValue(importer, param);
+                }
+                var alphaField = type.GetField("A", flags);
+                if (alphaField != null)
+                {
+                    var alpha = alphaField.GetValue(importer);
+                    var alphaType = alpha.GetType();
+                    alphaType.GetField("tex", flags).SetValue(alpha, mask);
+                    var alphaMode = alphaType.GetField("mode", flags);
+                    alphaMode.SetValue(alpha, Enum.Parse(alphaMode.FieldType, "A"));
+                    alphaType.GetField("fallbackValue", flags).SetValue(alpha, 1f);
+                    alphaField.SetValue(importer, alpha);
+                }
+                var wf = type.GetField("width", flags);
+                if (wf != null) wf.SetValue(importer, 1024);
+                var hf = type.GetField("height", flags);
+                if (hf != null) hf.SetValue(importer, 1024);
+                EditorUtility.SetDirty(importer);
+                AssetDatabase.WriteImportSettingsIfDirty(scmaskPath);
+                importer.SaveAndReimport();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                log.Warn("生成 .scmask 失败（已保留 PNG 遮罩）：" + exception.Message);
+                return false;
+            }
+        }
     }
 }
 
@@ -514,4 +590,7 @@ namespace NonToonSwitcher
 
 
 // touch 639266615773377304
+
+
+// touch 639266616722474604
 
