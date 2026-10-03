@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -507,7 +508,14 @@ namespace NonToonSwitcher
 
             var name = ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Gradients." + GradientsExtension;
             var path = folder.TrimEnd('/') + "/" + name;
-            File.WriteAllText(path, BuildGradientsAsset(gradients), new UTF8Encoding(false));
+            // 关键：`.scgradients` 的渐变**不在资产文件里** —— GradientsImporter 只读它自己 .meta 里的
+            // `gradients` 数组（脚本化导入器的序列化字段）。以前我们把渐变写进资产文件（还伪造了
+            // MonoBehaviour YAML），导入器完全忽略，于是每个材质拿到的都是默认渐变「白→白」，
+            // Shade 模块乘了个 1 —— 表现为没有阴影、整体偏亮、脸发白。
+            // 现在的做法：资产文件留空（和 Unity 自己 Create 出来的一样），渐变写进 .meta 的导入设置。
+            File.WriteAllText(path, string.Empty, new UTF8Encoding(false));
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            WriteGradientsMeta(path, gradients);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
 
             var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
@@ -652,6 +660,76 @@ namespace NonToonSwitcher
         /// Serialises the same fields that Shader Core's GradientsImporter keeps in its .scgradients asset,
         /// using Unity's own YAML flavour so the file can be imported by that importer.
         /// </summary>
+        /// <summary>
+        /// 把渐变写进 `.scgradients.meta` 的 ScriptedImporter 导入设置里 —— 这才是导入器真正读取的地方。
+        /// 会保留原有 guid（材质的 _SharedGradients 引用才不会断），没有就按路径生成一个稳定的。
+        /// </summary>
+        private static void WriteGradientsMeta(string assetPath, List<Gradient> gradients)
+        {
+            var importerGuid = FindGradientsImporterGuid();
+            if (string.IsNullOrEmpty(importerGuid))
+            {
+                Debug.LogWarning("[LilToNonToon Switcher] 找不到 Shader Core 的 GradientsImporter，" +
+                                 "阴影渐变没能写进 meta（材质的阴影会保持默认的「白→白」）。");
+                return;
+            }
+
+            var metaPath = assetPath + ".meta";
+            var assetGuid = ReadGuidFromMeta(metaPath);
+            if (string.IsNullOrEmpty(assetGuid)) assetGuid = StableGuidOf(assetPath);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("fileFormatVersion: 2");
+            sb.AppendLine("guid: " + assetGuid);
+            sb.AppendLine("ScriptedImporter:");
+            sb.AppendLine("  internalIDToNameTable: []");
+            sb.AppendLine("  externalObjects: {}");
+            sb.AppendLine("  serializedVersion: 2");
+            sb.AppendLine("  userData: ");
+            sb.AppendLine("  assetBundleName: ");
+            sb.AppendLine("  assetBundleVariant: ");
+            sb.AppendLine("  script: {fileID: 11500000, guid: " + importerGuid + ", type: 3}");
+            sb.AppendLine("  size: 128");
+            sb.AppendLine("  gradients:");
+            foreach (var gradient in gradients) WriteGradient(sb, gradient);
+            File.WriteAllText(metaPath, sb.ToString(), new UTF8Encoding(false));
+        }
+
+        /// <summary>Shader Core 里 GradientsImporter 的脚本 guid。</summary>
+        private static string FindGradientsImporterGuid()
+        {
+            foreach (var guid in AssetDatabase.FindAssets("GradientsImporter t:MonoScript"))
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (Path.GetFileNameWithoutExtension(path) != "GradientsImporter") continue;
+                return guid;
+            }
+            return null;
+        }
+
+        private static string ReadGuidFromMeta(string metaPath)
+        {
+            if (!File.Exists(metaPath)) return null;
+            foreach (var line in File.ReadLines(metaPath))
+            {
+                var trimmed = line.Trim();
+                if (!trimmed.StartsWith("guid:", StringComparison.Ordinal)) continue;
+                return trimmed.Substring(5).Trim();
+            }
+            return null;
+        }
+
+        private static string StableGuidOf(string assetPath)
+        {
+            using (var md5 = MD5.Create())
+            {
+                var hash = md5.ComputeHash(Encoding.UTF8.GetBytes("NonToonSwitcher/" + assetPath));
+                var sb = new StringBuilder(hash.Length * 2);
+                foreach (var b in hash) sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+                return sb.ToString();
+            }
+        }
+
         private static string BuildGradientsAsset(List<Gradient> gradients)
         {
             var sb = new StringBuilder();
@@ -700,10 +778,12 @@ namespace NonToonSwitcher
             sb.AppendLine("    atime0: 0");
             sb.AppendLine("    atime1: 65535");
             for (var i = 2; i < 8; i++) sb.AppendLine("    atime" + i + ": 0");
-            sb.AppendLine("    m_Mode: 0");
-            sb.AppendLine("    m_ColorSpace: -1");
-            sb.AppendLine("    m_NumColorKeys: " + keys.Length);
-            sb.AppendLine("    m_NumAlphaKeys: 2");
+            // 注意字段名没有 m_ 前缀 —— 这是导入器（ScriptedImporter）的序列化形式，
+            // 写成 m_Mode / m_NumColorKeys 那种旧版 Gradient 字段名导入器是不认的。
+            sb.AppendLine("    mode: 0");
+            sb.AppendLine("    colorSpace: -1");
+            sb.AppendLine("    numColorKeys: " + keys.Length);
+            sb.AppendLine("    numAlphaKeys: 2");
         }
 
         private static string ColorLine(Color color)
