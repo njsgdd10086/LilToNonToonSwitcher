@@ -76,6 +76,19 @@ namespace NonToonSwitcher
             var height = 0;
             var used = new List<string>();
             var channelOwner = new string[4];
+            // 关键：NonToon 所有自带模块的 Mask Channel 默认都是 A(3)，而共享遮罩是**一张**贴图、
+            // 每个模块按自己的通道号去读。如果我们的遮罩占了 A，就等于把 Shade / MatCap / 边缘光 /
+            // 发丝高光…全部模块的遮罩一起改掉了 —— 实测 shinano 的脸因此整片变白。
+            // 所以先把"目标材质上各模块当前指向的通道"登记为已占用，我们只会拿到真正空闲的通道。
+            for (var i = 0; i < nonToonMaterial.shader.GetPropertyCount(); i++)
+            {
+                var name = nonToonMaterial.shader.GetPropertyName(i);
+                if (name.IndexOf("MaskChannel", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                var value = Mathf.Clamp(ShaderUtility.GetIntValue(nonToonMaterial, name), 0, 3);
+                if (channelOwner[value] == null) channelOwner[value] = name;
+            }
+            if (channelOwner[3] != null)
+                log.Mapped("共享遮罩通道已被其它模块占用", "我们的遮罩会避开它们（A 被 " + channelOwner[3] + " 等占用）");
             // 通道分配先记下来，等遮罩贴图写完之后**统一**写入再统一保存 ——
             // 边烘边写会写不进 .mat（实测：MatCap 的遮罩被分到了 R 通道，但模块的 Mask Channel
             // 仍然停在默认的 A，于是 MatCap 被乘成 ~0，金色装饰整片消失）。
