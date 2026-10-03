@@ -57,10 +57,9 @@ namespace NonToonSwitcher
                 new MaskSource { LilToonProperty = "_MatCap2ndBlendMask", ModuleKeyword = matCap2ndModule, FeatureName = "2nd matcap mask",
                                  RequireToggle = true, ToggleProperty = "_UseMatCap2nd" },
                 new MaskSource { LilToonProperty = "_HairSpecularMask", ModuleKeyword = "HairSpecular", FeatureName = "hair specular mask" },
-                // 自发光蒙版：NonToon 没有 emission 属性，我们用自带 Lighten 模块的 As Emission 近似
-                // （lightColor = lerp(lightColor, max(lightColor, _LightBoost), mask[通道])），
-                // 所以把 lilToon 的 _EmissionBlendMask 烘进共享遮罩并挂到 Lighten 上。
-                new MaskSource { LilToonProperty = "_EmissionBlendMask", ModuleKeyword = "Lighten", FeatureName = "emission mask",
+                // 自发光蒙版：NonToon 没有 emission 属性，我们用 ShadeReplace 模块的加算自发光近似，
+                // 它的蒙版读共享遮罩的 _EmissionMaskChannel 通道 —— 所以这里按普通遮罩烘进去。
+                new MaskSource { LilToonProperty = "_EmissionBlendMask", ModuleKeyword = "Emission", FeatureName = "emission mask",
                                  RequireToggle = true, ToggleProperty = "_UseEmission" },
             };
 
