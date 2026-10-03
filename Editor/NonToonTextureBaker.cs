@@ -175,7 +175,13 @@ namespace NonToonSwitcher
             var gradationUsed = gradationTexture != null && gradationStrength > 0f;
 
             // 主色、色调校正（HSV/Gamma）、渐变映射都是默认值、也没用透明遮罩时，直接沿用原贴图。
-            if (!tintChanged && !toneChanged && !gradationUsed && !alphaMaskUsed)
+            // 有自发光时**不能**提前退出 —— 合并自发光写在下面，提前返回等于把眼睛高光丢掉。
+            // 实测 Shinano_face：主色/色调校正全是默认值（tintChanged/toneChanged 都是 false），
+            // 于是这里直接 return null ⇒ _BaseTexture 指回源贴图 ⇒ 高光永远不出现。
+            var emissionFile = folder.Replace('\\', '/').TrimEnd('/') + "/" +
+                               ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
+            var hasEmissionFile = System.IO.File.Exists(Path.GetFullPath(emissionFile));
+            if (!tintChanged && !toneChanged && !gradationUsed && !alphaMaskUsed && !hasEmissionFile)
             {
                 log.Mapped(usesDefaultWhite
                         ? "_MainTex 未指定（lilToon 用 shader 默认白贴图）"
