@@ -623,9 +623,34 @@ namespace NonToonSwitcher
 
                 // 受光处是 albedo × 光（NonToon 自己会乘），所以渐变在受光端回到白色；
                 // 混合系数还要过 _ShadowStrength（lilToon 的 lerp(1, s, strength)）
+                // 实测对照（同相机、同场景、裙子区域四分位）：均值已经和 lil 对齐（0.704 vs 0.697），
+                // 但对比跨度偏小 —— 我们 暗25%=0.502 / 亮25%=0.832（跨度 0.330），lil 是 0.443 / 0.887（0.444）。
+                // 也就是暗部不够暗、亮部不够亮。这里把色带的暗端按 0.88 收一点（x=1 处不动），
+                // 让跨度回到 lil 的量级；亮端受 lightColor 上限约束，靠主光补正那条一起抬。
+                var darkEnd = Mathf.Lerp(0.88f, 1f, x);
+                rgb = new Color(rgb.r * darkEnd, rgb.g * darkEnd, rgb.b * darkEnd, 1f);
+
                 var mix = Mathf.Lerp(1f, s1, strength);
                 rgb = Color.Lerp(rgb, Color.white, mix);
                 colorKeys.Add(new GradientColorKey(rgb, x));
+            }
+
+            // ★ 关键修正：上面按 avgAlbedo 相除后可能 > 1（浅色阴影 + 深色底，例如毛衣 avgAlbedo=0.529
+            //   而 _ShadowColor=0.771 ⇒ 1.46），而再 min(1) 钳平会让**整条色带变纯白 = 完全没有阴影**
+            //   （实测毛衣就是这样：ramp=1/1/1，画面发平）。渐变贴图存不下 >1，所以改成
+            //   "整条按最大值归一化"：保留明暗形状，只把整体压低；整体亮度由主光补正那条负责抬回来。
+            var maxKey = 0f;
+            foreach (var key in colorKeys)
+                maxKey = Mathf.Max(maxKey, Mathf.Max(key.color.r, Mathf.Max(key.color.g, key.color.b)));
+            if (maxKey > 1.0001f)
+            {
+                for (var i = 0; i < colorKeys.Count; i++)
+                {
+                    var c = colorKeys[i].color;
+                    colorKeys[i] = new GradientColorKey(new Color(c.r / maxKey, c.g / maxKey, c.b / maxKey, 1f), colorKeys[i].time);
+                }
+                if (log != null)
+                    log.Mapped("色带整体归一化", "最大值 " + maxKey.ToString("0.###") + " → 1（否则会被 min(1) 钳成纯白，完全没有阴影）");
             }
 
             var gradient = new Gradient();
@@ -877,3 +902,6 @@ namespace NonToonSwitcher
         }
     }
 }
+
+// touch 639266630190327725
+
