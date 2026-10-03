@@ -307,21 +307,13 @@ namespace NonToonSwitcher
             // 每个模块用烘焙时记下的**自己的**切片索引：只有 RimShade 被烘出来时它的索引是 0，
             // 按位置当成 Shade 的索引会让两个模块串位（Shade 采到边缘阴影的渐变、RimShade 反而关掉）。
             //
-            // 例外：如果材质启用了 com.nontoon.modules.shadereplace（Shade 替换模块），阴影由它接管，
-            // 这里必须把 Shade 渐变关掉（-1），否则会叠加两次。
-            var shadeReplaceEnabled = false;
-            for (var i = 0; i < destination.shader.GetPropertyCount(); i++)
-            {
-                var name = destination.shader.GetPropertyName(i);
-                if (name.IndexOf("shadereplace", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (!name.EndsWith("Enable", StringComparison.Ordinal)) continue;
-                shadeReplaceEnabled = ShaderUtility.ReadSerializedInt(destination, name, 0) != 0;
-                break;
-            }
+            // 注意：以前这里在启用 ShadeReplace 模块时把 Shade 渐变设成 -1（让那个模块接管明暗）。
+            // 现在 ShadeReplace 只做"补回丢失的主光"，**不再做明暗**，所以渐变必须保持打开 ——
+            // 否则材质就变成"只有光照、没有阴影分层"，中间调整片会被冲白（实测：衣服发白发平，
+            // 而均值指标看不出来，只有分层统计才暴露）。
             if (shadeProperty != null)
-                ShaderUtility.SetIntPersistent(destination, shadeProperty, shadeReplaceEnabled ? -1 : shadeIndex);
+                ShaderUtility.SetIntPersistent(destination, shadeProperty, shadeIndex);
             if (rimShadeProperty != null) ShaderUtility.SetIntPersistent(destination, rimShadeProperty, rimShadeIndex);
-            if (shadeReplaceEnabled) log.Mapped("Shade 渐变索引 = -1", "由 Shade 替换模块接管");
             EditorUtility.SetDirty(destination);
             AssetDatabase.SaveAssets();
         }
@@ -1054,7 +1046,8 @@ namespace NonToonSwitcher
             if (targets == null || targets.Length == 0) return false;
 
             var ok = false;
-            foreach (var target in targets)
+            var list = NormalizeTargets(targets);
+            foreach (var target in list)
             {
                 if (target == null || target.transform == null) continue;
 
@@ -1075,6 +1068,34 @@ namespace NonToonSwitcher
             }
 
             return ok;
+        }
+
+        /// <summary>
+        /// 多选时的去重：如果某个对象的**祖先也在选择里**，就把它去掉 ——
+        /// 否则"选中根对象 + 它的若干子物体"会给每个子物体都复制一份，对象数量爆炸
+        /// （用户反馈：多选修改时会创建大量对象）。同时去掉重复项和空项。
+        /// </summary>
+        internal static List<GameObject> NormalizeTargets(GameObject[] targets)
+        {
+            var result = new List<GameObject>();
+            if (targets == null) return result;
+            foreach (var candidate in targets)
+            {
+                if (candidate == null) continue;
+                var covered = false;
+                foreach (var other in targets)
+                {
+                    if (other == null || other == candidate) continue;
+                    // other 是 candidate 的祖先 → candidate 已经被 other 覆盖
+                    if (candidate.transform.IsChildOf(other.transform)) { covered = true; break; }
+                }
+                if (covered) continue;
+                if (!result.Contains(candidate)) result.Add(candidate);
+            }
+            // 全被覆盖时（理论上不会）退回到原始列表
+            if (result.Count == 0)
+                foreach (var t in targets) if (t != null) result.Add(t);
+            return result;
         }
 
         /// <summary>复制对象本体，名字加 <see cref="DuplicateSuffix"/>，并排在原对象后面。</summary>
