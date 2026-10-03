@@ -1368,66 +1368,6 @@ namespace NonToonSwitcher
         }
 
         /// <summary>Where the switch object is placed: as far up as possible while staying inside the avatar.</summary>
-        /// <summary>
-        /// 清理同一个 avatar 下重复生成的切换开关。
-        ///
-        /// 为什么会有重复：插件设置里那个「转换时总是新建 _NonToonSwitch」如果被勾上，
-        /// 每转换一次就会新建一整个开关（实测同一个 avatar 下并排躺着三个内容**完全相同**的
-        /// _NonToonSwitch，各 15 条），既占地方又会让 MA 菜单里出现三个同名条目。
-        /// 这里保留"条目最多"的那一个（同样多就保留最靠前的），其余删掉。
-        /// </summary>
-        [MenuItem("Tools/LilToNonToon Switcher/清理重复的 NonToon 开关", false, 60)]
-        private static void CleanupDuplicateSwitchers()
-        {
-            var roots = new List<GameObject>();
-            foreach (var selected in Selection.gameObjects)
-            {
-                if (selected == null) continue;
-                var avatar = FindAvatarRoot(selected);
-                var root = avatar != null ? avatar : selected;
-                if (!roots.Contains(root)) roots.Add(root);
-            }
-            if (roots.Count == 0)
-            {
-                EditorUtility.DisplayDialog("清理重复的 NonToon 开关",
-                    "请先在层级里选中 avatar（或它的任意子物体）。", "好");
-                return;
-            }
-
-            var removed = new List<string>();
-            foreach (var root in roots)
-            {
-                var candidates = new List<Transform>();
-                foreach (var child in root.GetComponentsInChildren<Transform>(true))
-                {
-                    if (child != null && child.name == SwitcherObjectName) candidates.Add(child);
-                }
-                if (candidates.Count <= 1) continue;
-
-                Transform keep = null;
-                var keepCount = -1;
-                foreach (var candidate in candidates)
-                {
-                    var count = CountSetterEntries(candidate.gameObject);
-                    if (count > keepCount) { keepCount = count; keep = candidate; }
-                }
-                foreach (var candidate in candidates)
-                {
-                    if (candidate == keep) continue;
-                    removed.Add(root.name + "/" + candidate.name + "（条目 " + CountSetterEntries(candidate.gameObject) + "）");
-                    Undo.DestroyObjectImmediate(candidate.gameObject);
-                }
-            }
-
-            EditorSceneManager_Helper.MarkDirty();
-            AssetDatabase.SaveAssets();
-            if (removed.Count == 0)
-                Debug.Log("[LilToNonToon] 没有发现重复的 " + SwitcherObjectName + "，未做修改。");
-            else
-                Debug.Log("[LilToNonToon] 已删除 " + removed.Count + " 个重复开关（每个 avatar 只保留条目最多的那个）：\n  " +
-                          string.Join("\n  ", removed.ToArray()));
-        }
-
         /// <summary>数一下某个开关对象上 MA Material Setter 的条目数（找不到就算 -1）。</summary>
         private static int CountSetterEntries(GameObject host)
         {
