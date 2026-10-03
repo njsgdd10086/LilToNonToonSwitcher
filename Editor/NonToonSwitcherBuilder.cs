@@ -53,8 +53,7 @@ namespace NonToonSwitcher
         private const string MenuInstallerTypeName = "nadena.dev.modular_avatar.core.ModularAvatarMenuInstaller, " + MaAssemblyHint;
         private const string ObjectReferenceTypeName = "nadena.dev.modular_avatar.core.AvatarObjectReference, " + MaAssemblyHint;
 
-        public static bool IsModularAvatarInstalled
-        {
+        public static bool IsModularAvatarInstalled        {
             get { return FindType(MaterialSwapTypeName) != null; }
         }
 
@@ -83,6 +82,12 @@ namespace NonToonSwitcher
         /// <summary>
         /// Creates the "_NonToonSwitch" object with the colour changer component and, optionally, a menu toggle.
         /// </summary>
+        /// <summary>供外部（例如"清理重复的 NonToon 开关"）拿到 MA Material Setter 的类型。</summary>
+        public static Type FindMaterialSetterType()
+        {
+            return FindType(MaterialSetterTypeName);
+        }
+
         public static GameObject Build(
             GameObject parent,
             GameObject swapRoot,
