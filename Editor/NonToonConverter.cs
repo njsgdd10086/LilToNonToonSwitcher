@@ -219,6 +219,14 @@ namespace NonToonSwitcher
             var target = log.Destination;
             if (source == null || target == null || string.IsNullOrEmpty(log.Folder)) return;
 
+            if (log.BakeSharedMask) NonToonMaskBuilder.Bake(source, target, log.Folder, log);
+
+            // Anything that had nowhere to go and could not be baked away becomes a warning now.
+            foreach (var pair in log.Unconverted) log.Unsupported(pair.Value);
+
+            // 顺序很重要：**先建遮罩（它会写出 <材质>_Emission.png），再烘基础贴图**。
+            // 基础贴图烘焙会读取那张发射贴图并逐像素合并进去；反过来（先烘贴图）读到的是
+            // 上一次转换留下的旧文件，首次转换时更是直接读到 1x1 黑图 ⇒ 眼睛高光永远合并不进去。
             if (log.BakeBaseTexture)
             {
                 var baked = NonToonTextureBaker.BakeBaseTexture(source, target, log.Folder, log);
@@ -244,10 +252,6 @@ namespace NonToonSwitcher
                 }
             }
 
-            if (log.BakeSharedMask) NonToonMaskBuilder.Bake(source, target, log.Folder, log);
-
-            // Anything that had nowhere to go and could not be baked away becomes a warning now.
-            foreach (var pair in log.Unconverted) log.Unsupported(pair.Value);
 
             EditorUtility.SetDirty(target);
             ShaderUtility.PersistIntegers(target);
