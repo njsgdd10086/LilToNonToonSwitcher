@@ -201,6 +201,9 @@ namespace NonToonSwitcher
             // 形状取自 _EmissionMap（没有就用 _EmissionBlendMask）的 **alpha** —— 实测 Atri_face_em 的
             // RGB 均值 0.805（几乎全白，用它会把整张脸点亮），而 alpha 均值 0.107（正好是眼睛那一块）。
             // 数值直接乘进贴图，因为模块的 float 属性送不进 shader（见上面的注释）。
+            // 自发光通道**永远**要写：关闭时写 0。否则 R/G/B 会保持上一版（或默认的 1），
+            // 而 phase 里是 `lightColor += sd.mask.rgb / albedo` —— 等于给整张脸加了约 1.1，
+            // 实测就是"整张脸爆白"。
             if (ShaderUtility.HasProperty(lilToonMaterial, "_UseEmission") &&
                 lilToonMaterial.GetFloat("_UseEmission") != 0f)
             {
@@ -216,11 +219,16 @@ namespace NonToonSwitcher
                 var emissionBlend = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlend")
                     ? lilToonMaterial.GetFloat("_EmissionBlend")
                     : 1f;
-                var emissionStrength = emissionBlend * emissionColor.a;
+                // lilToon 2.x: _EmissionMainStrength 决定"自发光有多少作用到主颜色"。
+                // 这份模型里几乎每个材质都是 0（作者只拿它做荧光/次要色），所以必须尊重它 ——
+                // 不乘它的话脸会被 +0.45 直接冲爆（实测：整张脸爆白、嘴部一团洋红）。
+                var emissionMainStrength = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionMainStrength")
+                    ? Mathf.Clamp01(lilToonMaterial.GetFloat("_EmissionMainStrength"))
+                    : 1f;
+                var emissionStrength = emissionBlend * emissionColor.a * emissionMainStrength;
 
                 if (emissionStrength > 0.001f && emissionShape != null &&
-                    ReadPixels(emissionShape, out var shapePixels, out var shapeWidth, out var shapeHeight, log, "自发光蒙版"))
-                {
+                    ReadPixels(emissionShape, out var shapePixels, out var shapeWidth, out var shapeHeight, log, "自发光蒙版"))                {
                     if (pixels == null)
                     {
                         width = shapeWidth;
@@ -245,6 +253,29 @@ namespace NonToonSwitcher
                     used.Add("自发光（取 alpha × 强度 × 颜色 → RGB）");
                     log.Mapped("自发光（_EmissionMap/_EmissionBlendMask 的 alpha × 强度 " +
                                emissionStrength.ToString("0.###") + " × 颜色）", "写入共享遮罩的 R/G/B 通道");
+                }
+                else
+                {
+                    // 有 _UseEmission 但实际不发光（强度 0 或没有形状贴图）：把 R/G/B 清零
+                    if (pixels != null)
+                    {
+                        for (var i = 0; i < pixels.Length; i++)
+                        {
+                            var cleared = pixels[i];
+                            cleared.r = 0f; cleared.g = 0f; cleared.b = 0f;
+                            pixels[i] = cleared;
+                        }
+                    }
+                    log.Mapped("自发光关闭（强度 " + emissionStrength.ToString("0.###") + "）", "共享遮罩 R/G/B 清零（不做加算）");
+                }
+            }
+            else if (pixels != null)
+            {
+                for (var i = 0; i < pixels.Length; i++)
+                {
+                    var cleared = pixels[i];
+                    cleared.r = 0f; cleared.g = 0f; cleared.b = 0f;
+                    pixels[i] = cleared;
                 }
             }
 
