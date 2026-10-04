@@ -730,8 +730,23 @@ namespace NonToonSwitcher
                 var full = Path.GetFullPath(scmaskPath);
                 var parent = Path.GetDirectoryName(full);
                 if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
-                if (!File.Exists(full)) File.WriteAllText(full, string.Empty);
-                AssetDatabase.ImportAsset(scmaskPath, ImportAssetOptions.ForceUpdate);
+
+                // ★ 关键：先删掉旧的 .scmask 与它的 .meta，强制 Unity 重新导入。
+                //
+                // 实测（用户工程，同一次转换的文件时间）：
+                //   ..._NTMask.png         16:24:31 ✓ 新写
+                //   ..._Emission.png       16:24:31 ✓ 新写
+                //   ..._NTMask.scmask.meta **15:56:38** ✗ 没更新
+                // ⇒ shader 读的贴图由 .scmask.meta 里的 R/G/B/A 决定，它指向旧内容，
+                //   于是遮罩里是上一轮的数据（实测非零像素 24898，而发射贴图只有 6781）
+                //   ⇒ 渲染成洋红（亮区 G 被吃掉）。删掉后重建才能保证内容是最新的。
+                if (File.Exists(full)) File.Delete(full);
+                var metaPath = full + ".meta";
+                if (File.Exists(metaPath)) File.Delete(metaPath);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+
+                File.WriteAllText(full, string.Empty);
+                AssetDatabase.ImportAsset(scmaskPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
                 var importer = AssetImporter.GetAtPath(scmaskPath);
                 if (importer == null) return false;
                 var type = importer.GetType();
@@ -782,6 +797,19 @@ namespace NonToonSwitcher
                 EditorUtility.SetDirty(importer);
                 AssetDatabase.WriteImportSettingsIfDirty(scmaskPath);
                 importer.SaveAndReimport();
+
+                // 写完后校验一次：.meta 里的 R 通道必须指向本次的发射贴图，
+                // 否则 shader 读到的还是旧内容（实测踩过：.meta 时间戳没变 ⇒ 渲染偏色）。
+                var metaOnDisk = full + ".meta";
+                if (File.Exists(metaOnDisk))
+                {
+                    var metaText = File.ReadAllText(metaOnDisk);
+                    var stamp = File.GetLastWriteTime(metaOnDisk);
+                    if (log != null)
+                        log.Mapped("共享遮罩校验", ".scmask.meta 写入时间 " + stamp.ToString("HH:mm:ss") +
+                            (metaText.IndexOf("mode: 0") >= 0 && metaText.IndexOf("mode: 1") >= 0 && metaText.IndexOf("mode: 2") >= 0
+                                ? "，R/G/B 三个通道都已配置 ✓" : "，**通道配置不完整** ✗"));
+                }
                 return true;
             }
             catch (Exception exception)
