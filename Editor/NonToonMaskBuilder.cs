@@ -358,6 +358,21 @@ namespace NonToonSwitcher
                 var emPath = dir2 + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
                 WriteTexture(emissionPixels, emissionWidth, emissionHeight, emPath);
                 AssetDatabase.ImportAsset(emPath, ImportAssetOptions.ForceUpdate);
+                // 发射贴图必须**无压缩、无 mipmap、不 Clamp 拉伸**，否则眼睛高光会发糊（用户对比 lil 指出）。
+                // 它是颜色贴图（HDR 蓝白），所以 sRGB = true。
+                if (AssetImporter.GetAtPath(emPath) is TextureImporter emImp)
+                {
+                    emImp.textureType = TextureImporterType.Default;
+                    emImp.sRGBTexture = true;
+                    emImp.alphaSource = TextureImporterAlphaSource.FromInput;
+                    emImp.alphaIsTransparency = false;
+                    emImp.mipmapEnabled = false;
+                    emImp.wrapMode = TextureWrapMode.Clamp;
+                    emImp.filterMode = FilterMode.Bilinear;
+                    emImp.textureCompression = TextureImporterCompression.Uncompressed;
+                    emImp.maxTextureSize = 4096;
+                    emImp.SaveAndReimport();
+                }
                 var emAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(emPath);
                 var emSlot = FabricModuleInstaller.FindModuleProperty(nonToonMaterial.shader, "shadereplace", "EmissionTexture");
                 if (emAsset != null && emSlot != null)
@@ -521,9 +536,11 @@ namespace NonToonSwitcher
                 importer.sRGBTexture = false;               // masks are data, not colour
                 importer.alphaSource = TextureImporterAlphaSource.FromInput;
                 importer.alphaIsTransparency = false;
-                importer.mipmapEnabled = true;
-                importer.wrapMode = TextureWrapMode.Repeat;
+                // 关掉 mipmap：遮罩是"数据"，远处被 mip 平均后会让门控变糊（眼睛高光会散开）。
+                importer.mipmapEnabled = false;
+                importer.wrapMode = TextureWrapMode.Clamp;
                 importer.filterMode = FilterMode.Bilinear;
+                importer.textureCompression = TextureImporterCompression.Uncompressed;
                 importer.SaveAndReimport();
             }
         }
