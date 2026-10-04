@@ -253,6 +253,14 @@ namespace NonToonSwitcher
                 var emissionColor = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionColor")
                     ? lilToonMaterial.GetColor("_EmissionColor")
                     : Color.white;
+                // 按通道最大值归一化（NormalizeEmissionColor）：保持色相、把偏色去掉。
+                // 实测源 _EmissionColor = (1.789, 1.919, 2.119)（HDR 蓝白）⇒ 直接加算会让眼睛偏青/偏紫，
+                // 而 lilToon 那边的观感是中性白。归一化后 = (0.844, 0.906, 1.0)，高光接近白色。
+                {
+                    var mx = Mathf.Max(emissionColor.r, Mathf.Max(emissionColor.g, emissionColor.b));
+                    if (mx > 0.0001f)
+                        emissionColor = new Color(emissionColor.r / mx, emissionColor.g / mx, emissionColor.b / mx, emissionColor.a);
+                }
                 var emissionBlend = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlend")
                     ? lilToonMaterial.GetFloat("_EmissionBlend")
                     : 1f;
