@@ -316,7 +316,8 @@ namespace NonToonSwitcher
 
                 var strength = FabricModuleInstaller.FindPropertyName(shader, "FabricStrength");
                 // 默认 0.25：强度扫描对照源 lilToon 后选的（0 = 平得像塑料，0.5 偏强，1.0 出现刺眼噪点）
-                if (strength != null) ShaderUtility.SetFloatValue(dst, strength, 0.25f);
+                // 不写强度值：FabricStrength 的默认值由模块自己的 properties.hlsl 决定，
+                // 转换器硬写 0.25 属于"魔法值补偿"，已移除（用户明确要求转换必须严谨、不许猜数值）。
 
                 // 自动启用（用户要求：保持自动启用，bug 就修）。
                 // 注意：本模块属于自建模块，实测 Shader Core **不下发其属性**，所以相位里**不能依赖任何

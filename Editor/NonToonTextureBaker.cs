@@ -631,7 +631,7 @@ namespace NonToonSwitcher
             var first = ShaderUtility.HasProperty(material, "_ShadowColor") ? material.GetColor("_ShadowColor") : Color.white;
             var second = ShaderUtility.HasProperty(material, "_Shadow2ndColor")
                 ? material.GetColor("_Shadow2ndColor")
-                : new Color(0.68f, 0.66f, 0.79f, 1f);
+                : new Color(0.68f, 0.66f, 0.79f, 1f);   // lilToon 的 _Shadow2ndColor 出厂默认值（仅在源材质缺少该属性时使用）
             var third = ShaderUtility.HasProperty(material, "_Shadow3rdColor")
                 ? material.GetColor("_Shadow3rdColor")
                 : Color.black;
