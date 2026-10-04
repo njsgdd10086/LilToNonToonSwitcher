@@ -794,6 +794,18 @@ namespace NonToonSwitcher
                 if (wf != null) wf.SetValue(importer, 1024);
                 var hf = type.GetField("height", flags);
                 if (hf != null) hf.SetValue(importer, 1024);
+
+                // ★ 关键：把 .scmask 的输出格式设成 RGBA32（无损）。
+                //
+                // 依据（读 Shader Core 源码得出，不是猜的）：
+                //   MaskImporter:  public TextureFormat format = TextureFormat.BC7;      ← 默认有损
+                //   MaskGenerator: new Texture2D(width, height, RGBA32, true) + CompressTexture(format, Best)
+                // 也就是遮罩贴图默认是 BC7 块压缩。BC7 对"小面积、高对比"的内容损失最大，而自发光数据
+                // 正是稀疏亮点（实测发射贴图只有 6781 个非零像素 / 1024²），压缩后会糊开并让通道塌陷：
+                // 实测 shader 读到的遮罩非零像素 24898（3.67 倍），亮区 G 被吃掉 ⇒ 渲染偏洋红/青。
+                // 材质属性本来就该无损，所以这里显式指定 RGBA32（与我们在导入发射贴图时的做法一致）。
+                var fmtField = type.GetField("format", flags);
+                if (fmtField != null) fmtField.SetValue(importer, TextureFormat.RGBA32);
                 EditorUtility.SetDirty(importer);
                 AssetDatabase.WriteImportSettingsIfDirty(scmaskPath);
                 importer.SaveAndReimport();
