@@ -475,7 +475,7 @@ namespace NonToonSwitcher
                     emImp.SaveAndReimport();
                 }
                 var emAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(emPath);
-                var emSlot = FabricModuleInstaller.FindModuleProperty(nonToonMaterial.shader, "shadereplace", "EmissionTexture");
+                var emSlot = ModuleInstaller.FindModuleProperty(nonToonMaterial.shader, "shadereplace", "EmissionTexture");
                 if (emAsset != null && emSlot != null)
                 {
                     nonToonMaterial.SetTexture(emSlot, emAsset);
@@ -603,7 +603,7 @@ namespace NonToonSwitcher
 
             // 自发光用关键字做逐材质门槛（实测这是 Shader Core 下唯一能进 shader 的开关）。
             // 只有真的烘出了自发光的材质才打开；否则没有 .scmask 的材质会采样到遮罩默认白，加算 +2 直接爆白。
-            var emissionOnSlot = FabricModuleInstaller.FindModuleProperty(nonToonMaterial.shader, "shadereplace", "EmissionOn");
+            var emissionOnSlot = ModuleInstaller.FindModuleProperty(nonToonMaterial.shader, "shadereplace", "EmissionOn");
             if (emissionOnSlot != null)
             {
                 var hasEmission = emissionStrengthForKeyword > 0.001f;

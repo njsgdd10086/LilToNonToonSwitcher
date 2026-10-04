@@ -291,48 +291,15 @@ namespace NonToonSwitcher
                     to + " = (" + low.ToString("0.###") + ", " + high.ToString("0.###") + ")（换算回原始空间）");
             }, "边缘光边界/模糊/菲涅尔幂 -> 边缘光范围");
 
-            // 织物/细节法线模块（插件自带，会登记进 NonToon 的 Shader Core 模块列表）：
-            // 主 _NormalMap 的扰动在受光面没有出口（sd.lightColor 被 saturate 了），这个模块在
-            // __SC_PHASE_postpixel__ 里只把"法线扰动造成的明暗差"乘回去 —— 织物纹理就是这么显示出来的。
-            MapFunc("_BumpMap", "fabric", (src, dst, log) =>
-            {
-                var texture = ShaderUtility.HasProperty(src, "_BumpMap") ? src.GetTexture("_BumpMap") : null;
-                if (texture == null) return;
-                if (!FabricModuleInstaller.EnsureInstalled(log)) return;
-
-                var shader = dst.shader;
-                var mapProperty = FabricModuleInstaller.FindPropertyName(shader, "FabricNormalMap");
-                if (mapProperty == null)
-                {
-                    log.Warn("织物法线模块刚登记，NonToon 的 shader 还在重新生成 —— 请稍后再转换一次。");
-                    return;
-                }
-                dst.SetTexture(mapProperty, texture);
-
-                var normalStrength = FabricModuleInstaller.FindPropertyName(shader, "FabricNormalStrength");
-                if (normalStrength != null)
-                    ShaderUtility.SetFloatValue(dst, normalStrength,
-                        ShaderUtility.HasProperty(src, "_BumpScale") ? src.GetFloat("_BumpScale") : 1f);
-
-                var strength = FabricModuleInstaller.FindPropertyName(shader, "FabricStrength");
-                // 默认 0.25：强度扫描对照源 lilToon 后选的（0 = 平得像塑料，0.5 偏强，1.0 出现刺眼噪点）
-                // 不写强度值：FabricStrength 的默认值由模块自己的 properties.hlsl 决定，
-                // 转换器硬写 0.25 属于"魔法值补偿"，已移除（用户明确要求转换必须严谨、不许猜数值）。
-
-                // 自动启用（用户要求：保持自动启用，bug 就修）。
-                // 注意：本模块属于自建模块，实测 Shader Core **不下发其属性**，所以相位里**不能依赖任何
-                // 材质参数**（否则读到默认值/未初始化值会画出不受控的色块）。相位已改为只用几何法线 sd.N
-                // 与共享遮罩（都是可达的核心数据）做织物明暗。
-                var enable = FabricModuleInstaller.FindPropertyName(shader, "Enable");
-                if (enable != null)
-                {
-                    ShaderUtility.SetIntPersistent(dst, enable, 1);
-                    var key = enable.ToUpperInvariant();
-                    dst.EnableKeyword(key + "_1");
-                    dst.DisableKeyword(key + "_0");
-                    log.Mapped("_BumpMap → 织物法线模块", enable + " = 1（相位不依赖模块属性）");
-                }
-            }, "织物/细节法线模块");
+            // lilToon 的 _BumpMap / _BumpScale 走 NonToon 自己的正规通道（_NormalMap / _NormalScale），
+            // 由上面的法线映射统一处理。这里**不再**挂自建的 Fabric 模块。
+            //
+            // 为什么删掉（实测结论）：
+            //   · 自建模块的属性 Shader Core 不下发，相位只能靠几何法线 sd.N 的低频投影 ⇒ 实测贡献 < 2%
+            //     （同一材质 A/B：Fabric 关 0.3167 / 开 0.3159；把系数从 0.25 放大到 8 也只差 2%）
+            //   · 织物纹理真正显现的原因是另外两个修复：**Shade 色带对比度** 与 **法线进入 sd.N**
+            //     —— 多角度对比图里 Fabric 关着时，两侧针织纹理已逐条一致
+            //   · 于是它成了纯冗余：多一个 shader 变体、多一份属性噪音，却没有可见收益
 
             // Shade 替换模块（模块包里的 com.nontoon.modules.shadereplace）：
             // lilToon 是 col = lerp(indirectCol, directCol, lns)，阴影色是**绝对颜色**，可以比本体还亮
@@ -345,10 +312,10 @@ namespace NonToonSwitcher
                 if (!ShaderUtility.HasProperty(src, "_ShadowColor")) return;
 
                 const string token = "shadereplace";
-                if (!FabricModuleInstaller.EnsureModule("com.nontoon.modules.shadereplace", "Shade 替换模块", log)) return;
+                if (!ModuleInstaller.EnsureModule("com.nontoon.modules.shadereplace", "Shade 替换模块", log)) return;
 
                 var shader = dst.shader;
-                var enable = FabricModuleInstaller.FindModuleProperty(shader, token, "Enable");
+                var enable = ModuleInstaller.FindModuleProperty(shader, token, "Enable");
                 if (enable == null)
                 {
                     log.Warn("Shade 替换模块刚登记，NonToon 的 shader 还在重新生成 —— 请稍后再转换一次。");
@@ -358,14 +325,14 @@ namespace NonToonSwitcher
                 var setColor = new Action<string, string>((lilToonName, suffix) =>
                 {
                     if (!ShaderUtility.HasProperty(src, lilToonName)) return;
-                    var property = FabricModuleInstaller.FindModuleProperty(shader, token, suffix);
+                    var property = ModuleInstaller.FindModuleProperty(shader, token, suffix);
                     if (property == null) return;
                     dst.SetColor(property, src.GetColor(lilToonName));
                 });
                 var setFloat = new Action<string, string>((lilToonName, suffix) =>
                 {
                     if (!ShaderUtility.HasProperty(src, lilToonName)) return;
-                    var property = FabricModuleInstaller.FindModuleProperty(shader, token, suffix);
+                    var property = ModuleInstaller.FindModuleProperty(shader, token, suffix);
                     if (property == null) return;
                     ShaderUtility.SetFloatValue(dst, property, src.GetFloat(lilToonName));
                 });

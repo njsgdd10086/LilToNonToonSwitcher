@@ -14,10 +14,8 @@ using UnityEngine;
 
 namespace NonToonSwitcher
 {
-    internal static class FabricModuleInstaller
+    internal static class ModuleInstaller
     {
-        /// <summary>模块在 .scmodule 里声明的 uniqueID（模块包里的 Fabric 模块）。</summary>
-        public const string ModuleId = "jp.nontoon.switcher.fabric";
 
         /// <summary>模块包里的公共 API 类。</summary>
         private const string RegistryTypeName = "NonToonModules.NonToonModuleRegistry";
@@ -50,34 +48,6 @@ namespace NonToonSwitcher
             return isEnabled != null && (bool)isEnabled.Invoke(null, new object[] { ModuleId });
         }
 
-        /// <summary>确保模块被勾选（转换时调用；幂等）。</summary>
-        public static bool EnsureInstalled(ConversionLog log)
-        {
-            var type = RegistryType();
-            if (type == null)
-            {
-                if (log != null)
-                    log.Warn("没有安装模块包 " + ModulesPackageName + "，织物/法线细节模块不可用（布料会偏塑料感）。\n" +
-                             "在 VCC/ALCOM 里更新本插件即可自动装好，或手动安装 NonToon Modules。");
-                return false;
-            }
-
-            var ensure = type.GetMethod("EnsureEnabled", BindingFlags.Public | BindingFlags.Static);
-            if (ensure == null) return false;
-            try
-            {
-                var result = (bool)ensure.Invoke(null, new object[] { ModuleId, "织物/法线细节模块" });
-                if (result && log != null) log.Mapped("织物模块", "已在 NonToon 模块列表里勾选（" + ModuleId + "）");
-                else if (!result && log != null) log.Warn("勾选织物模块失败，可以打开 Tools/NonToon 模块/模块管理… 手动勾选。");
-                return result;
-            }
-            catch (Exception exception)
-            {
-                var inner = exception.InnerException ?? exception;
-                if (log != null) log.Warn("勾选织物模块时出错：" + inner.Message);
-                return false;
-            }
-        }
 
         /// <summary>确保任意模块被勾选（转换时调用；幂等）。模块包没装时返回 false。</summary>
         public static bool EnsureModule(string moduleId, string label, ConversionLog log)
@@ -121,7 +91,9 @@ namespace NonToonSwitcher
 
         /// <summary>
         /// 模块的属性在材质上的实际名字。Shader Core 会给属性加上包名前缀
-        /// （例如 `_jp_nontoon_switcher_fabric_Enable`），前缀规则不假定，按"以 suffix 结尾且包含 fabric"找。
+        /// （例如 `_com_nontoon_modules_shadereplace_ShadowColor`），前缀规则不假定，
+        /// 只按"以 suffix 结尾"找 —— 调用方传进来的 suffix 本身就是唯一的
+        /// （例如 `EmissionTexture`、`ShadeGradientIndex`），不会撞名。
         /// </summary>
         public static string FindPropertyName(Shader shader, string suffix)
         {
@@ -131,7 +103,6 @@ namespace NonToonSwitcher
             {
                 var name = shader.GetPropertyName(i);
                 if (!name.EndsWith(suffix, StringComparison.Ordinal)) continue;
-                if (name.IndexOf("fabric", StringComparison.OrdinalIgnoreCase) < 0) continue;
                 return name;
             }
             return null;
