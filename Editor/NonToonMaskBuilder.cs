@@ -247,8 +247,12 @@ namespace NonToonSwitcher
                 // ⇒ 输出 1x1 黑图 ⇒ 眼睛高光丢失。真正的信号是"_UseEmission 开着 + _EmissionBlendMask 挂了贴图"。
                 var usesEmissionMask = emissionMask != null;
                 // 没有 _EmissionMap 时，把蒙版本身当作形状来源（蒙版的 A 就是形状）
-                var shapeTexture = emissionMap != null ? emissionMap : (usesEmissionMask ? emissionMask : null);
-                var shapeIsMask = emissionMap == null && usesEmissionMask;
+                // **蒙版优先**（用户要求）：lilToon 面板里"蒙版"这一行（_EmissionBlendMask）才是发光形状，
+                // 而"纹理/蒙版"那一行（_EmissionMap）在很多材质上是颜色贴图（实测 ATRI 的 737373 是灰白，
+                // shinano 的 D7E7FF 是淡蓝），拿它当形状会把整块材质点亮。
+                // 所以：有 _EmissionBlendMask 就用它，没有才退回 _EmissionMap。
+                var shapeTexture = usesEmissionMask ? emissionMask : emissionMap;
+                var shapeIsMask = usesEmissionMask;
 
                 var emissionColor = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionColor")
                     ? lilToonMaterial.GetColor("_EmissionColor")
