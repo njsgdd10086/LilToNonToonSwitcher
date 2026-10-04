@@ -531,6 +531,34 @@ namespace NonToonSwitcher
             }
             log.Mapped("lilToon 遮罩（" + string.Join("、", used) + "）", "_SharedMask");
 
+            // ------------------------------------------------------------------
+            // 关掉 NonToon **自己的** Emission 模块，只保留我们相位的加算。
+            //
+            // 实测证据（用户转换日志）：
+            //   [ OK ] emission map  ->  写入共享遮罩的 G 通道（模块的 Mask Channel 也随之改为 G）
+            //   [ OK ] 自发光开关    ->  _com_nontoon_modules_shadereplace_EmissionOn = 开
+            //   [ OK ] 自发光（_EmissionMap + 无蒙版…） -> 写入共享遮罩的 R/G/B 通道
+            // 也就是同一份自发光被加了两遍：NonToon 自己的 Emission 模块读 G 通道发光，
+            // ShadeReplace 的 postpixel 又做 sd.col.rgb += sd.mask.rgb。
+            // 结果亮度翻倍、HDR 的通道比例被放大 ⇒ 用户实测"整脸泛紫"。
+            //
+            // 保留我们这一路的原因：sd.mask.rgb 是直接写入的发光数据，无光照场景下也能亮；
+            // 而 NonToon 自己的 Emission 会被光照系数乘掉（这正是之前"完全无光照时眼睛不亮"的原因）。
+            // ------------------------------------------------------------------
+            for (var pi = 0; pi < nonToonMaterial.shader.GetPropertyCount(); pi++)
+            {
+                var pname = nonToonMaterial.shader.GetPropertyName(pi);
+                var lower = pname.ToLowerInvariant();
+                if (lower.IndexOf("nontoon") < 0 || lower.IndexOf("emission") < 0) continue;
+                if (!lower.EndsWith("_enable")) continue;
+                var was = ShaderUtility.GetIntValue(nonToonMaterial, pname);
+                ShaderUtility.SetIntValue(nonToonMaterial, pname, 0);
+                nonToonMaterial.EnableKeyword(pname.ToUpperInvariant() + "_0");
+                nonToonMaterial.DisableKeyword(pname.ToUpperInvariant() + "_1");
+                if (was != 0)
+                    log.Mapped("NonToon 自带 Emission", pname + " = 关（避免与相位重复加算）");
+            }
+
             // 统一写通道 + 读回校验（写不进就明确报警，免得又变成"金饰消失"这种哑巴问题）
             if (assignments.Count > 0)
             {
