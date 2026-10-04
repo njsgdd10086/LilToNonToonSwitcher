@@ -59,6 +59,43 @@ namespace NonToonSwitcher
     {
         // ------------------------------------------------------------------ discovery
 
+        /// <summary>
+        /// 扫描目标上的渲染器，把「接受阴影 / 投射阴影」被关掉的情况报进转换结果。
+        ///
+        /// 为什么要报：这两个开关在 Mesh Renderer 的「照明」分组里，**关掉后任何着色器都收不到阴影**，
+        /// 表现是"脸在阴影里始终很亮、完全不接受阴影"。实测排查成本极高（材质、色带、着色器相位全都
+        /// 看起来正常），最后发现只是 Mesh Renderer 上的 Receive Shadows 没勾。
+        /// 这里在转换时直接提示，并在日志里指出具体对象名，便于定位。
+        /// </summary>
+        private static void CheckRendererShadowFlags(List<Renderer> renderers, ConversionResult result)
+        {
+            if (renderers == null) return;
+            var noReceive = new List<string>();
+            var noCast = new List<string>();
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null) continue;
+                var path = renderer.gameObject.name;
+                var parent = renderer.transform.parent;
+                var depth = 0;
+                while (parent != null && depth++ < 3) { path = parent.name + "/" + path; parent = parent.parent; }
+                if (!renderer.receiveShadows) noReceive.Add(path + "（" + renderer.GetType().Name + "）");
+                if (renderer.shadowCastingMode == UnityEngine.Rendering.ShadowCastingMode.Off) noCast.Add(path);
+            }
+            if (noReceive.Count > 0)
+            {
+                result.Warnings.Add("有 " + noReceive.Count + " 个渲染器的 Mesh Renderer → 照明 → **接受阴影** 没有勾选，" +
+                                    "这些部位在阴影里永远不会变暗（跟着色器无关，改材质也没用）：" +
+                                    string.Join("、", noReceive.ToArray()));
+            }
+            if (noCast.Count > 0)
+            {
+                result.Warnings.Add("有 " + noCast.Count + " 个渲染器的**投射阴影**是 Off（它们不会在地上投出影子，通常是有意为之）：" +
+                                    string.Join("、", noCast.ToArray()));
+            }
+        }
+
+
         public static void CollectRenderers(GameObject root, bool includeInactive, List<Renderer> renderers)
         {
             if (root == null) return;
@@ -787,6 +824,12 @@ namespace NonToonSwitcher
             // 1. find everything that has to be converted
             var renderers = new List<Renderer>();
             foreach (var target in request.Targets) CollectRenderers(target, request.IncludeInactive, renderers);
+
+            // 渲染器层面的常见坑：Mesh Renderer 上的「接受阴影」没勾时，**任何着色器都不会收到阴影**，
+            // 表现是"脸在阴影里一直很亮、完全不接受阴影"，但查代码/材质/着色器都查不出来。
+            // 实测踩过：用户找了很久，最后发现是模型上某个 Mesh Renderer 的 Receive Shadows 没开。
+            // 所以转换时就把它报出来，省得以后再去翻 Mesh Renderer。
+            CheckRendererShadowFlags(renderers, result);
 
             var materials = new List<Material>();
             foreach (var renderer in renderers)
