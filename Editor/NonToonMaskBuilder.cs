@@ -256,23 +256,20 @@ namespace NonToonSwitcher
                 // （实测发射贴图 R/B 0.654，而 lil 渲染 0.857、源 _EmissionColor 0.844）⇒ 颜色偏青。
                 //
                 // 不用"贴图是否赋值"当判据：lilToon 2.x 的材质经常挂着贴图但功能没开，关键字才是它自己的开关。
-                var hasEmissionMapKw = lilToonMaterial.IsKeywordEnabled("LIL_FEATURE_EmissionMap");
-                var hasEmissionMaskKw = lilToonMaterial.IsKeywordEnabled("LIL_FEATURE_EmissionBlendMask");
-                var shapeTexture = hasEmissionMaskKw ? emissionMask : (hasEmissionMapKw ? emissionMap : null);
-                var shapeIsMask = hasEmissionMaskKw;
-                if (shapeTexture == null && (emissionMap != null || emissionMask != null))
+                // **按贴图是否存在决定形状**（不要用 LIL_FEATURE_* 关键字判断）。
+                //
+                // 教训（渲染对比实测）：我曾改成 `IsKeywordEnabled("LIL_FEATURE_EmissionMap")`，
+                // 两个关键字在 shinano 的材质上都是 false ⇒ 判定为"不乘任何贴图" ⇒ 自发光**均匀铺满整张脸** ✗，
+                // 而 lil 的实际渲染是"脸几乎全黑、只有眼睛在暗发光" ✓。
+                // 原因：lilToon 的功能开关是 multi_compile / 局部关键字，`Material.shaderKeywords` 读不到，
+                // 所以"关键字"不是可靠信号；**贴图是否赋值**才是（lilToon 2.x 面板里挂上贴图就等于启用）。
+                var usesEmissionMask = emissionMask != null;
+                var shapeTexture = usesEmissionMask ? emissionMask : emissionMap;
+                var shapeIsMask = usesEmissionMask;
+                if (shapeTexture == null && log != null)
                 {
-                    log.Mapped("自发光贴图门槛",
-                        "lil 的两个功能关键字都没开（_EmissionMap=" + (emissionMap != null ? "有贴图" : "空") +
-                        "、_EmissionBlendMask=" + (emissionMask != null ? "有贴图" : "空") +
-                        "）⇒ 与 lil 一致：**不乘任何贴图**，发光均匀铺满该材质");
+                    log.Mapped("自发光形状", "源材质两个贴图都是空 ⇒ 与 lil 一致：均匀铺满该材质");
                 }
-                // 没有 _EmissionMap 时，把蒙版本身当作形状来源（蒙版的 A 就是形状）
-                // **蒙版优先**（用户要求）：lilToon 面板里"蒙版"这一行（_EmissionBlendMask）才是发光形状，
-                // 而"纹理/蒙版"那一行（_EmissionMap）在很多材质上是颜色贴图（实测 ATRI 的 737373 是灰白，
-                // shinano 的 D7E7FF 是淡蓝），拿它当形状会把整块材质点亮。
-                // 所以：有 _EmissionBlendMask 就用它，没有才退回 _EmissionMap。
-
                 var emissionColor = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionColor")
                     ? lilToonMaterial.GetColor("_EmissionColor")
                     : Color.white;
@@ -371,7 +368,7 @@ namespace NonToonSwitcher
                     Color[] maskPixels2 = null;
                     var maskWidth2 = 0;
                     var maskHeight2 = 0;
-                    if (hasEmissionMaskKw)
+                    if (usesEmissionMask)
                         ReadPixels(emissionMask, out maskPixels2, out maskWidth2, out maskHeight2, log, "自发光蒙版");
 
                     if (pixels == null)
@@ -426,7 +423,7 @@ namespace NonToonSwitcher
                     }
                     emissionStrengthForKeyword = 1f;
                     used.Add("自发光（照 lilToon 公式：颜色 × 贴图RGB × 蒙版A × 混合 × 主色强度插值）");
-                    log.Mapped("自发光（_EmissionMap + " + (hasEmissionMaskKw ? "_EmissionBlendMask" : "无蒙版") +
+                    log.Mapped("自发光（_EmissionMap + " + (usesEmissionMask ? "_EmissionBlendMask" : "无蒙版") +
                                "，主色强度 " + emissionMainStrength.ToString("0.###") + "，混合 " + emissionBlend.ToString("0.###") + "）",
                                "写入共享遮罩的 R/G/B 通道");
                 }
