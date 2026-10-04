@@ -740,6 +740,7 @@ namespace NonToonSwitcher
 
             var gradient = new Gradient();
             EnsureGradientDirection(colorKeys);
+            ForceGradientEnds(colorKeys, first, avgAlbedo, border1, blur1, strength, windowScale);
             gradient.SetKeys(colorKeys.ToArray(), new[]
             {
                 new GradientAlphaKey(1f, 0f),
@@ -825,6 +826,52 @@ namespace NonToonSwitcher
         /// That is exactly the reported symptom: "the face glows in shadow and takes no shadow at all".
         /// This guard mirrors the ramp if the two ends are the wrong way round.
         /// </summary>
+        /// <summary>
+        /// Force the ramp's two ends to the physically correct values.
+        ///
+        /// Root problem (measured): the generated ramp came out with x=0 = 0.982 and the dark value
+        /// 0.770 sitting at x=0.6..1, i.e. the shadow colour landed at the LIT end. NonToon's Shade
+        /// samples _SharedGradients by the lighting amount, so x=0 must be shadow and x=1 must be lit -
+        /// reversed keys make the shadow side sample the brightest value, which shows up as "the face
+        /// glows in shadow and takes no shadow at all" (user, in game).
+        ///
+        /// Rather than trusting the window maths, this rewrites the ends explicitly:
+        ///   x = 0   -> _ShadowColor / averageAlbedo   (dark, clamped to <= 1)
+        ///   x = 1   -> white                          (fully lit)
+        /// and lets the middle keys keep whatever shape they had.
+        /// </summary>
+        private static void ForceGradientEnds(List<GradientColorKey> keys, Color shadowColor, Color avgAlbedo,
+            float border, float blur, float strength, float windowScale)
+        {
+            if (keys == null || keys.Count == 0) return;
+            keys.Sort((a, b) => a.time.CompareTo(b.time));
+
+            var dark = new Color(
+                Mathf.Clamp01(shadowColor.r / Mathf.Max(0.001f, avgAlbedo.r)),
+                Mathf.Clamp01(shadowColor.g / Mathf.Max(0.001f, avgAlbedo.g)),
+                Mathf.Clamp01(shadowColor.b / Mathf.Max(0.001f, avgAlbedo.b)), 1f);
+
+            // 暗端：x=0 必须是阴影色（并按 _ShadowStrength 向白插值，strength=1 时保持暗）
+            var darkMix = Mathf.Lerp(1f, 0f, Mathf.Clamp01(strength));
+            var endDark = Color.Lerp(dark, Color.white, darkMix);
+            keys[0] = new GradientColorKey(endDark, 0f);
+
+            // 亮端：x=1 必须是白（受光处 = albedo × 光，NonToon 自己会乘）
+            var lastIdx = keys.Count - 1;
+            keys[lastIdx] = new GradientColorKey(Color.white, 1f);
+
+            // 中间关键点若比暗端还暗，抬到暗端（避免反向）
+            for (var i = 1; i < keys.Count - 1; i++)
+            {
+                var k = keys[i];
+                var lum = 0.2126f * k.color.r + 0.7152f * k.color.g + 0.0722f * k.color.b;
+                var lumDark = 0.2126f * endDark.r + 0.7152f * endDark.g + 0.0722f * endDark.b;
+                if (lum < lumDark)
+                    keys[i] = new GradientColorKey(endDark, k.time);
+            }
+        }
+
+
         private static void EnsureGradientDirection(List<GradientColorKey> keys)
         {
             if (keys == null || keys.Count < 2) return;
