@@ -71,23 +71,12 @@ namespace NonToonSwitcher
                                  SkipIfPropertyPresent = "_EmissionMap" },
             };
 
-            var directory0 = folder.Replace('\\', '/').TrimEnd('/');
-            var hasEmissionForMask = false;
-            {
-                var emCheck = directory0 + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
-                var emCheckTex = AssetDatabase.LoadAssetAtPath<Texture2D>(emCheck);
-                if (emCheckTex != null)
-                {
-                    Color[] cp; int cw, ch;
-                    if (ReadPixels(emCheckTex, out cp, out cw, out ch, log, "自发光检查") && cp != null)
-                    {
-                        double sum = 0;
-                        for (var i = 0; i < cp.Length; i++) sum += cp[i].r + cp[i].g + cp[i].b;
-                        hasEmissionForMask = sum > 0.0001;
-                    }
-                }
-            }
 
+            // 注意：**不能在这里检查文件是否存在**。发射贴图是本次 Bake 后面才写出来的，
+            // 首次转换时文件还不存在 ⇒ 会被误判为"没有自发光" ⇒ 把 R/G/B 清成 0（实测：
+            // 脸部遮罩 RGB 峰值变成 0，无光照下眼睛完全不亮）。真正的判据是下面自发光块里
+            // 算出的 emissionStrengthForKeyword（内存里的结果，不依赖文件时序）。
+            var hasEmissionForMask = false;
             Color[] pixels = null;
             var width = 0;
             var height = 0;
@@ -427,6 +416,7 @@ namespace NonToonSwitcher
             // 只有眼睛那类真的烘出内容的材质才留下数据。
             // A 通道不动：Lighten / MatCap / 边缘光等模块都读 A（默认通道）。
             // ------------------------------------------------------------------
+            hasEmissionForMask = emissionStrengthForKeyword > 0.5f;   // ← 用内存里的结果，不看文件
             if (!hasEmissionForMask)
             {
                 for (var i = 0; i < pixels.Length; i++)
