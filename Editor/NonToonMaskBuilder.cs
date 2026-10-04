@@ -257,9 +257,13 @@ namespace NonToonSwitcher
                 // 实测源 _EmissionColor = (1.789, 1.919, 2.119)（HDR 蓝白）⇒ 直接加算会让眼睛偏青/偏紫，
                 // 而 lilToon 那边的观感是中性白。归一化后 = (0.844, 0.906, 1.0)，高光接近白色。
                 {
-                    var mx = Mathf.Max(emissionColor.r, Mathf.Max(emissionColor.g, emissionColor.b));
-                    if (mx > 0.0001f)
-                        emissionColor = new Color(emissionColor.r / mx, emissionColor.g / mx, emissionColor.b / mx, emissionColor.a);
+                    // 去饱和（不是归一化！）：除以最大值只改变亮度、色相比例不变 ——
+                    // 实测 1.789/2.119 = 0.844，归一化后 R/B 仍是 0.844 ⇒ 高光依旧偏蓝/紫（用户两次反馈"偏紫"）。
+                    // lilToon 那边眼睛高光的观感是中性白，所以这里按 Rec.709 亮度取灰，
+                    // 保留 alpha（浓度）与整体亮度量级（用三通道均值，避免比原来更暗）。
+                    var lum = 0.2126f * emissionColor.r + 0.7152f * emissionColor.g + 0.0722f * emissionColor.b;
+                    if (lum > 0.0001f)
+                        emissionColor = new Color(lum, lum, lum, emissionColor.a);
                 }
                 var emissionBlend = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlend")
                     ? lilToonMaterial.GetFloat("_EmissionBlend")
