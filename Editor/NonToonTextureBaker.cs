@@ -626,7 +626,7 @@ namespace NonToonSwitcher
         /// 老版本把关键点放在 `1 - border` 上（等于镜像）而且完全没用 blur —— 结果是分界线跑到
         /// 接近受光的位置、还是硬边 + 渐变贴图的阶梯。
         /// </summary>
-        private static Gradient BuildShadeGradient(Material material, ConversionLog log)
+        private static Gradient BuildShadeGradient(Material material, ConversionLog log, bool ratioFaithful = true)
         {
             var first = ShaderUtility.HasProperty(material, "_ShadowColor") ? material.GetColor("_ShadowColor") : Color.white;
             var second = ShaderUtility.HasProperty(material, "_Shadow2ndColor")
@@ -744,10 +744,10 @@ namespace NonToonSwitcher
                 // 不这么做的话只有两条坏路：
                 //   · 暗端 min(1, k) ⇒ k>1 时整条变纯白 ⇒ 毫无明暗、法线完全不可见（这就是原 bug）
                 //   · 暗端不钳 ⇒ 贴图存不下 >1 ⇒ 被硬件钳成白 ⇒ 同上
-                var ratioK = NonToonTextureBaker.ShadeRatioCompensation;
-                if (ratioK > 0.0001f)
+                // 补偿量由本函数算出（ratioFaithful 为 true 时生效），见 shadowRatio 的计算处
+                if (ratioFaithful && shadowRatio > 1.0001f)
                 {
-                    rgb = new Color(rgb.r / ratioK, rgb.g / ratioK, rgb.b / ratioK, 1f);
+                    rgb = new Color(rgb.r / shadowRatio, rgb.g / shadowRatio, rgb.b / shadowRatio, 1f);
                 }
 
                 var mix = Mathf.Lerp(1f, s1, strength);
@@ -857,15 +857,6 @@ namespace NonToonSwitcher
             var span = Mathf.Max(max - min, 0.0001f);
             return Mathf.Clamp01((value - min) / span);
         }
-
-        /// <summary>
-        /// 色带"比值忠实化"的开关（方案 A）。
-        /// 1 = 不做补偿，色带暗端直接用阴影色（当前行为）；
-        /// &gt;1 = 把整条色带除以该值 ⇒ 明暗**比值**与 lilToon 一致（因为 NonToon 是乘算、lilToon 是替换），
-        /// 代价是整体暗了同样的倍数，由主光补回来。
-        /// 由转换器按材质算出 shadow/avgAlbedo 后临时设置，不写进材质属性。
-        /// </summary>
-        internal static float ShadeRatioCompensation = 1f;
 
         private static Gradient BuildRimShadeGradient(Material material)
         {
