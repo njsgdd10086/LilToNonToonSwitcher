@@ -560,12 +560,22 @@ namespace NonToonSwitcher
             // 生成失败就保留 PNG 引用，绝不留下空遮罩。
             var scPath = directory + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_NTMask.scmask";
             var emPathForMask = directory + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
+            // ★ 记住 .scmask 是否接上了：下面写 PNG 时必须**不要覆盖**它。
+            //
+            // 实测事故（mirufy 模型，整身被染青）：
+            //   第 568 行接上了正确的 .scmask（RGBA32、R/G/B=自发光、A=原遮罩），
+            //   但下面第 602 行又无条件 `SetTexture("_SharedMask", asset)` 把 PNG 写了回去，
+            //   PNG 是 RGB24 且 R/G/B 装着**旧版**的遮罩内容（实测 Body_base 为 (0.001,1,1)）
+            //   ⇒ postpixel 的 `sd.col.rgb += sd.mask.rgb` 给整身加了一层青色（白物体变青、皮肤变灰蓝，
+            //     而红色通道恰好正常 ⇒ 眼睛仍正确）。所以这里用这个标志阻止覆盖。
+            Texture2D scmaskAsset = null;
             if (File.Exists(Path.GetFullPath(emPathForMask)) && BuildScmask(scPath, emPathForMask, maskPath, log))
             {
-                var scAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(scPath);
-                if (scAsset != null)
+                scmaskAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(scPath);
+                if (scmaskAsset != null)
                 {
-                    nonToonMaterial.SetTexture("_SharedMask", scAsset);
+                    nonToonMaterial.SetTexture("_SharedMask", scmaskAsset);
+                    EditorUtility.SetDirty(nonToonMaterial);
                     log.Mapped("共享遮罩", scPath + "（.scmask：R/G/B=自发光、A=原遮罩）");
                 }
             }
@@ -599,7 +609,19 @@ namespace NonToonSwitcher
                 return;
             }
 
-            nonToonMaterial.SetTexture("_SharedMask", asset);
+            // 只有在 .scmask 没接上时才退回 PNG —— 否则会把上面刚接好的 .scmask 覆盖掉，
+            // 导致遮罩 R/G/B 又变成 PNG 里的旧内容（实测会把整个模型染青）。
+            if (scmaskAsset == null)
+            {
+                nonToonMaterial.SetTexture("_SharedMask", asset);
+                EditorUtility.SetDirty(nonToonMaterial);
+            }
+            else if (nonToonMaterial.GetTexture("_SharedMask") != scmaskAsset)
+            {
+                // 极端情况下中间有别的代码动过，这里再保一次
+                nonToonMaterial.SetTexture("_SharedMask", scmaskAsset);
+                EditorUtility.SetDirty(nonToonMaterial);
+            }
 
             // 自发光用关键字做逐材质门槛（实测这是 Shader Core 下唯一能进 shader 的开关）。
             // 只有真的烘出了自发光的材质才打开；否则没有 .scmask 的材质会采样到遮罩默认白，加算 +2 直接爆白。
