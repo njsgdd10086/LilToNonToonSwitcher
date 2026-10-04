@@ -271,7 +271,7 @@ namespace NonToonSwitcher
                         // 半去饱和：保留一半原始色相（用户反馈"完全去饱和后颜色是灰的"），
                         // 同时压掉一半偏色（此前全用原色时高光偏青/偏紫）。
                         // 0.5 = 折中；要更忠实就往 0 调、要更中性就往 1 调。
-                        var Desaturate = NonToonSwitcherSettings.instance.EmissionDesaturate;
+                        const float Desaturate = 0.0f;   // 已废弃：真正的机制是实现 _EmissionMainStrength
                         emissionColor = new Color(
                             Mathf.Lerp(emissionColor.r, lum, Desaturate),
                             Mathf.Lerp(emissionColor.g, lum, Desaturate),
@@ -488,10 +488,31 @@ namespace NonToonSwitcher
             }
 
             var asset = AssetDatabase.LoadAssetAtPath<Texture2D>(maskPath);
+            if (asset == null && !File.Exists(Path.GetFullPath(maskPath)))
+            {
+                // 已经成功接上 .scmask 的情况不算失败：Shader Core 用的是 .scmask 生成出来的贴图，
+                // _NTMask.png 只是它的 A 通道来源。实测 Shinano_face_alpha 走"无遮罩源"分支时
+                // 这张 PNG 没落盘（File.Exists 为 False），于是这里误报"遮罩加载失败、通道用默认值"，
+                // 而默认值 = 全白 ⇒ postpixel 把整张脸加亮成淡紫（用户实测现象）。
+                var alreadyBound = nonToonMaterial.GetTexture("_SharedMask") != null;
+                if (alreadyBound)
+                {
+                    log.Mapped("共享遮罩", "已由 .scmask 接上（_NTMask.png 未落盘：本材质没有遮罩源，属正常）");
+                    return;
+                }
+                log.Warn("生成的共享遮罩加载失败（路径：" + maskPath + "，文件存在：" +
+                         File.Exists(Path.GetFullPath(maskPath)) + "); the mask channel values were left at their defaults.");
+                return;
+            }
             if (asset == null)
             {
-                log.Warn("生成的共享遮罩加载失败（路径：" + maskPath + "，文件存在：" +
-                         File.Exists(maskPath) + "); the mask channel values were left at their defaults.");
+                // 文件在、但还没被 AssetDatabase 导入：刷新一次再取
+                AssetDatabase.ImportAsset(maskPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+                asset = AssetDatabase.LoadAssetAtPath<Texture2D>(maskPath);
+            }
+            if (asset == null)
+            {
+                log.Warn("生成的共享遮罩加载失败（路径：" + maskPath + "); the mask channel values were left at their defaults.");
                 return;
             }
 
