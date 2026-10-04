@@ -71,6 +71,23 @@ namespace NonToonSwitcher
                                  SkipIfPropertyPresent = "_EmissionMap" },
             };
 
+            var directory0 = folder.Replace('\\', '/').TrimEnd('/');
+            var hasEmissionForMask = false;
+            {
+                var emCheck = directory0 + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
+                var emCheckTex = AssetDatabase.LoadAssetAtPath<Texture2D>(emCheck);
+                if (emCheckTex != null)
+                {
+                    Color[] cp; int cw, ch;
+                    if (ReadPixels(emCheckTex, out cp, out cw, out ch, log, "自发光检查") && cp != null)
+                    {
+                        double sum = 0;
+                        for (var i = 0; i < cp.Length; i++) sum += cp[i].r + cp[i].g + cp[i].b;
+                        hasEmissionForMask = sum > 0.0001;
+                    }
+                }
+            }
+
             Color[] pixels = null;
             var width = 0;
             var height = 0;
@@ -361,6 +378,21 @@ namespace NonToonSwitcher
             // phase 里基于遮罩值的自发光门槛就会把整只模型点亮。R/G/B=自发光（无则 0）、A=常量 1。
             if (pixels == null)
             {
+                // 这条分支（没有任何遮罩源）走的是**独立的** .scmask 生成路径，
+                // 之前漏了 R/G/B 清零 —— 实测 Shinano_body 正好走这里，遮罩 RGB 残留 (1,0.907,1)
+                // ⇒ postpixel 的无条件加算把它加到脖子上 ⇒ 出现洋红块（渲染实测确认）。
+                // 所以这里也按"有没有自发光"决定是否清零。
+                pixels = new Color[Mathf.Max(1, width) * Mathf.Max(1, height)];
+                for (var i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
+                if (!hasEmissionForMask)
+                {
+                    for (var i = 0; i < pixels.Length; i++)
+                    {
+                        var c = pixels[i];
+                        c.r = 0f; c.g = 0f; c.b = 0f;
+                        pixels[i] = c;
+                    }
+                }
                 var scOnlyPath = folder.Replace('\\', '/').TrimEnd('/') + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_NTMask.scmask";
                 var emOnlyPath = folder.Replace('\\', '/').TrimEnd('/') + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
                 if (File.Exists(Path.GetFullPath(emOnlyPath)) && BuildScmask(scOnlyPath, emOnlyPath, null, log))
@@ -376,22 +408,6 @@ namespace NonToonSwitcher
             if (pixels == null) return;
 
             // 这张材质有没有真的烘出自发光（决定 R/G/B 是否保留数据）
-            var directory0 = folder.Replace('\\', '/').TrimEnd('/');
-            var hasEmissionForMask = false;
-            {
-                var emCheck = directory0 + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
-                var emCheckTex = AssetDatabase.LoadAssetAtPath<Texture2D>(emCheck);
-                if (emCheckTex != null)
-                {
-                    Color[] cp; int cw, ch;
-                    if (ReadPixels(emCheckTex, out cp, out cw, out ch, log, "自发光检查") && cp != null)
-                    {
-                        double sum = 0;
-                        for (var i = 0; i < cp.Length; i++) sum += cp[i].r + cp[i].g + cp[i].b;
-                        hasEmissionForMask = sum > 0.0001;
-                    }
-                }
-            }
 
             var directory = folder.Replace('\\', '/').TrimEnd('/');
             EnsureFolder(directory);
