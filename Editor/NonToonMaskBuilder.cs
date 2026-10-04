@@ -609,7 +609,12 @@ namespace NonToonSwitcher
                     // R/G/B 不挂贴图（常量 0）：共享遮罩是各方共用资源，一旦这里非零，
                     // ShadeReplace 的 postpixel 加算就会给所有材质加色（用户实测：删掉
                     // _SharedMask 画面即恢复正常，身体出现洋红/黄色块就是它造成的）。
-                    paramType.GetField("tex", flags).SetValue(param, emission);
+                    // **R/G/B 必须挂真正的遮罩内容**，不能挂自发光！
+                    // 实测教训：曾经把自发光写进 R/G/B，而自发光数据几乎全黑（均值 0.005、
+                    // 峰值仅 0.29），于是所有读 R/G/B 通道的模块门控全部变成 0 ⇒ 
+                    // 用户实测「ShadeReplace 勾不勾都没效果」「Lighten 拉高 boost 也没效果」。
+                    // 用户满意的那一版，遮罩 R/G/B 里是**有内容的**（实测呈洋红），模块才能工作。
+                    paramType.GetField("tex", flags).SetValue(param, mask);
                     var modeField = paramType.GetField("mode", flags);
                     modeField.SetValue(param, Enum.Parse(modeField.FieldType, names[i]));
                     paramType.GetField("fallbackValue", flags).SetValue(param, 0f);
