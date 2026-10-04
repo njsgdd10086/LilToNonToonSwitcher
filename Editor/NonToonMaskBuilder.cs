@@ -329,7 +329,13 @@ namespace NonToonSwitcher
                                 Mathf.Lerp(em.y, em.y * albedo.g, emissionMainStrength),
                                 Mathf.Lerp(em.z, em.z * albedo.b, emissionMainStrength));
                             // lil: emissionBlend = _EmissionBlend * emissionColor.a（emissionColor.a 已含贴图与蒙版的 alpha）
-                            var value = emissionBlend * emissionColor.a * m.a;
+                            // lilToon 的高光之所以是中性白，是因为它的 HDR 颜色 (1.79/1.92/2.12) 乘完
+                    // 形状与 alpha 之后，**亮部仍然超过 1 ⇒ 在显示时饱和成纯白**；弱部才露出色调。
+                    // 而遮罩贴图是 RGBA32（会被钳到 1），所以必须把"HDR 的峰值"乘进强度里，
+                    // 才能复现同样的饱和行为 —— 否则整块高光都停在 1 以下，HDR 的偏色原样显示 ⇒ 发青。
+                    // 这不是去色：颜色比例一个都没动，只是把整体亮度提到该有的水平。
+                    var hdrPeak = Mathf.Max(1f, Mathf.Max(emissionColor.r, Mathf.Max(emissionColor.g, emissionColor.b)));
+                    var value = emissionBlend * emissionColor.a * m.a * hdrPeak;
                             emissionPixels[y * width + x] = new Color(em.x * value, em.y * value, em.z * value, 1f);
                             var target = pixels[y * width + x];
                             target.r = em.x * value;
