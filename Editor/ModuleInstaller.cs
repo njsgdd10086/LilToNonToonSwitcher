@@ -36,7 +36,10 @@ namespace NonToonSwitcher
         /// <summary>模块包装了没有。</summary>
         public static bool ModulesPackagePresent() => RegistryType() != null;
 
-        /// <summary>模块有没有被勾选（登记进 NonToon 的模块列表）。</summary>
+        /// <summary>模块包里的 ShadeReplace 模块 uniqueID（转换器会确保它被勾选）。</summary>
+        public const string ShadeReplaceModuleId = "com.nontoon.modules.shadereplace";
+
+        /// <summary>ShadeReplace 模块有没有被勾选（登记进 NonToon 的模块列表）。</summary>
         public static bool IsInstalled(out string shaderPath)
         {
             shaderPath = null;
@@ -45,7 +48,7 @@ namespace NonToonSwitcher
             var pathMethod = type.GetMethod("FindNonToonShaderPath", BindingFlags.Public | BindingFlags.Static);
             if (pathMethod != null) shaderPath = pathMethod.Invoke(null, null) as string;
             var isEnabled = type.GetMethod("IsEnabled", BindingFlags.Public | BindingFlags.Static);
-            return isEnabled != null && (bool)isEnabled.Invoke(null, new object[] { ModuleId });
+            return isEnabled != null && (bool)isEnabled.Invoke(null, new object[] { ShadeReplaceModuleId });
         }
 
 
