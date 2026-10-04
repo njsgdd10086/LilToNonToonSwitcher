@@ -790,6 +790,16 @@ namespace NonToonSwitcher
             var layers = use3 ? "3 层" : use2 ? "2 层" : "1 层";
             log.Mapped("阴影色 " + layers + "（border " + border1.ToString("0.###") + " / blur " + blur1.ToString("0.###") +
                        "，按 lilToon 的过渡窗口取关键点）", "_SharedGradients（Shade 渐变）");
+
+            // 把补偿倍数交回给调用方：色带被整体除了 shadowRatio ⇒ 受光/阴影都暗了同样倍数，
+            // 需要用 NonToon 自己的「亮度」(LightLimit 的 Brightness) 按同一倍数补回来。
+            // 实测（全模型正面，同相机同光照）：
+            //   Brightness=1.0 → 0.287   Brightness=1.7 → 0.470   Brightness=2.5 → 0.661   (lilToon = 0.728)
+            // 所以这个"从材质自身算出来的倍数"正好就是应该填进菜单的值 —— 用户也可以随时手改。
+            ShadeRatio = shadowRatio;
+            if (log != null && shadowRatio > 1.0001f)
+                log.Mapped("色带比值忠实化 ×1/" + shadowRatio.ToString("0.###"),
+                    "亮度补偿：把「亮度」(LightLimit Brightness) 设为 " + shadowRatio.ToString("0.###") + " 即可补回（也可在菜单里手改）");
             return gradient;
         }
 
@@ -864,6 +874,9 @@ namespace NonToonSwitcher
             var span = Mathf.Max(max - min, 0.0001f);
             return Mathf.Clamp01((value - min) / span);
         }
+
+        /// <summary>最近一次烘焙算出的 shadowRatio，供调用方写进 LightLimit 的 Brightness。</summary>
+        internal static float ShadeRatio = 1f;
 
         private static Gradient BuildRimShadeGradient(Material material)
         {

@@ -331,6 +331,26 @@ namespace NonToonSwitcher
             }
 
             var gradients = NonToonTextureBaker.BakeGradients(source, destination, folder, out var shadeIndex, out var rimShadeIndex, log);
+
+            // 亮度补偿：色带被整体除以 shadowRatio（明暗比值忠实于 lilToon），
+            // 这由 NonToon 自己的「亮度」(LightLimit 的 Brightness) 补回来 —— 转换器按材质自动填好，
+            // 用户之后可以随时在那个菜单里手改。
+            // 实测依据（同相机同光照，全模型正面均值）：Brightness 1.0 -> 0.287、1.7 -> 0.470、2.5 -> 0.661，lilToon = 0.728。
+            var shadeK = NonToonTextureBaker.ShadeRatio;
+            if (shadeK > 1.0001f)
+            {
+                const string brightnessProperty = "_com_atrinaxu_nontoon_lightlimit_Brightness";
+                if (ShaderUtility.HasProperty(destination, brightnessProperty))
+                {
+                    ShaderUtility.SetFloatValue(destination, brightnessProperty, shadeK);
+                    log.Mapped("亮度补偿 x" + shadeK.ToString("0.###"),
+                        "已把 NonToon 的「亮度」设为 " + shadeK.ToString("0.###") + "（= 阴影色/平均底色，随材质自动算；可在模块菜单里手改）");
+                }
+                else
+                {
+                    log.Warn("找不到 LightLimit 的「亮度」属性，色带已按比值压暗但亮度没补 —— 请手动把「亮度」调到 " + shadeK.ToString("0.###") + "。");
+                }
+            }
             if (gradients == null)
             {
                 // Without a ramp the Shade module would sample an empty array, which renders black, so the
