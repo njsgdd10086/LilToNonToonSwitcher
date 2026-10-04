@@ -365,6 +365,21 @@ namespace NonToonSwitcher
         /// </summary>
         public static Material ConvertOne(Material source, string outputFolder, string preferredName, ConversionLog log)
         {
+            // ★ 防重复转换：源材质如果已经是 NonToon，直接拒绝。
+            //
+            // 为什么必须有这道闸（实测教训）：我误把已经转换出来的 `carde paleblue_nontoon`
+            // 再喂给转换器，它没有 `_MainTex`（读不到平均底色 ⇒ avgAlbedo = 1）、
+            // `_ShadowColor` 又是模块默认的纯白 ⇒ 色带被烘成 0 → 1 的硬边，
+            // 而日志里"阴影色 1/1/1、平均色 1/1/1"正是这个症状。
+            // 更糟的是输出会覆盖已经正确的材质，把好结果改坏。
+            if (source != null && source.shader != null &&
+                (source.shader.name == "NonToon" || source.shader.name.StartsWith("NonToon")) ||
+                (source != null && source.shader != null && source.shader.name.IndexOf("NonToon", System.StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                if (log != null) log.Warn("跳过：`" + source.name + "` 已经是 NonToon 材质（shader = " + source.shader.name + "），不能再次转换 —— 请对 lilToon 源材质操作。");
+                return null;
+            }
+
             return ConvertOne(source, outputFolder, preferredName, log, true, true, null);
         }
 
