@@ -263,7 +263,17 @@ namespace NonToonSwitcher
                     // 保留 alpha（浓度）与整体亮度量级（用三通道均值，避免比原来更暗）。
                     var lum = 0.2126f * emissionColor.r + 0.7152f * emissionColor.g + 0.0722f * emissionColor.b;
                     if (lum > 0.0001f)
-                        emissionColor = new Color(lum, lum, lum, emissionColor.a);
+                    {
+                        // 半去饱和：保留一半原始色相（用户反馈"完全去饱和后颜色是灰的"），
+                        // 同时压掉一半偏色（此前全用原色时高光偏青/偏紫）。
+                        // 0.5 = 折中；要更忠实就往 0 调、要更中性就往 1 调。
+                        const float Desaturate = 0.5f;
+                        emissionColor = new Color(
+                            Mathf.Lerp(emissionColor.r, lum, Desaturate),
+                            Mathf.Lerp(emissionColor.g, lum, Desaturate),
+                            Mathf.Lerp(emissionColor.b, lum, Desaturate),
+                            emissionColor.a);
+                    }
                 }
                 var emissionBlend = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlend")
                     ? lilToonMaterial.GetFloat("_EmissionBlend")
