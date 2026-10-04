@@ -693,10 +693,19 @@ namespace NonToonSwitcher
                 //   所以先把阴影色除以材质的平均基础色，乘回来才等于原色，也就是 lilToon 的 lerp。
                 // 注意：渐变贴图是 RGBA32（会被钳到 1），所以"阴影比 albedo 还亮"的情况做不到，
                 // 这里用 Min(1, ...) 取最接近的近似（= 不再双重变暗）。
-                rgb = new Color(
-                    Mathf.Min(1f, rgb.r / avgAlbedo.r),
-                    Mathf.Min(1f, rgb.g / avgAlbedo.g),
-                    Mathf.Min(1f, rgb.b / avgAlbedo.b), 1f);
+                // ★ 不再除以 avgAlbedo，也不再逐通道 min(1)。
+                //
+                // 教训（实测，开衫 carde paleblue）：_ShadowColor=0.771，而该材质的平均底色
+                // avgAlbedo≈0.35 ⇒ 0.771/0.35 = 2.2 ⇒ 被 min(1) 钳成 1 ⇒ **整条色带纯白**
+                // ⇒ NonToon 的 Shade 做 `sd.col.rgb *= ramp(shade)` 就等于 ×1
+                // ⇒ 模型完全没有明暗对比，法线贴图也完全看不见（实测 _NormalScale 0/1.2/8 渲染差 <1%）。
+                // 之前写在下面的"整体归一化"补救是死代码：它判断 maxKey > 1.0001，而这里已经 min(1) 过了。
+                //
+                // 正确做法：色带的暗端直接用 _ShadowColor 本身，亮端回到白色。
+                // 这保留了明暗形状（法线才能被看见）；由于 NonToon 是乘算而 lilToon 是替换，
+                // 浅色材质两者接近，深色材质这里会略暗一些 —— 这是可接受的近似，
+                // 远好于"整条纯白、毫无明暗"。
+                rgb = new Color(rgb.r, rgb.g, rgb.b, 1f);
                 // 关键点数值写进日志：色带是否"整条发白"看这里最直接
                 if (log != null)
                 {
