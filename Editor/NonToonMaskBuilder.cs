@@ -375,6 +375,24 @@ namespace NonToonSwitcher
             }
             if (pixels == null) return;
 
+            // 这张材质有没有真的烘出自发光（决定 R/G/B 是否保留数据）
+            var directory0 = folder.Replace('\\', '/').TrimEnd('/');
+            var hasEmissionForMask = false;
+            {
+                var emCheck = directory0 + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_Emission.png";
+                var emCheckTex = AssetDatabase.LoadAssetAtPath<Texture2D>(emCheck);
+                if (emCheckTex != null)
+                {
+                    Color[] cp; int cw, ch;
+                    if (ReadPixels(emCheckTex, out cp, out cw, out ch, log, "自发光检查") && cp != null)
+                    {
+                        double sum = 0;
+                        for (var i = 0; i < cp.Length; i++) sum += cp[i].r + cp[i].g + cp[i].b;
+                        hasEmissionForMask = sum > 0.0001;
+                    }
+                }
+            }
+
             var directory = folder.Replace('\\', '/').TrimEnd('/');
             EnsureFolder(directory);
             var maskPath = directory + "/" + ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_NTMask.png";
@@ -382,6 +400,26 @@ namespace NonToonSwitcher
             var existing = nonToonMaterial.GetTexture("_SharedMask") as Texture2D;
             if (existing != null && AssetDatabase.GetAssetPath(existing) != maskPath)
                 log.Warn("NonToon 共享遮罩原本已有内容（" + existing.name + "），现在被生成的遮罩替换了。");
+
+            // ------------------------------------------------------------------
+            // 关键：遮罩 PNG 的 R/G/B 只允许承载**自发光**，没有自发光的材质必须清零。
+            //
+            // 为什么：postpixel 相位做的是无条件 `sd.col.rgb += sd.mask.rgb`（lilToon 的自发光混合模式是
+            // Add，必须加算才能在无光照时也亮）。而 shader 实际读到的 sd.mask 是**遮罩 PNG**，它的 R/G/B
+            // 本来装的是各路遮罩内容 —— 实测：body=(1,0.907,1)、costume=(1,1,0.672)、hair=(1,1,0.571)，
+            // 于是整身被染成洋红/黄（用户截图就是这个现象）。所以这里把没有自发光的材质的 R/G/B 归零，
+            // 只有眼睛那类真的烘出内容的材质才留下数据。
+            // A 通道不动：Lighten / MatCap / 边缘光等模块都读 A（默认通道）。
+            // ------------------------------------------------------------------
+            if (!hasEmissionForMask)
+            {
+                for (var i = 0; i < pixels.Length; i++)
+                {
+                    var c = pixels[i];
+                    c.r = 0f; c.g = 0f; c.b = 0f;
+                    pixels[i] = c;
+                }
+            }
 
             WriteTexture(pixels, width, height, maskPath);
             ImportAsMask(maskPath);
