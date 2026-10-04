@@ -279,10 +279,56 @@ namespace NonToonSwitcher
                             emissionColor.a);
                     }
                 }
+                // ------------------------------------------------------------------
+                // ★ 准备 emission 用的 albedo —— lil 的 fd.albedo。
+                //
+                // lil 原文（lil_pass_forward_normal.hlsl:248，注释就是 "Copy"）：
+                //     fd.albedo = fd.col.rgb;          // 在 "Lighting" **之前**
+                //     ...
+                //     emissionColor.rgb = lerp(emissionColor.rgb, emissionColor.rgb * fd.albedo, _EmissionMainStrength);
+                // 也就是「主色贴图 × _Color、光照之前」的颜色。
+                //
+                // 这里曾经用错：`var albedo = pixels[...]` —— 而 `pixels` 是**共享遮罩的累加数组**
+                // （初始全白，随后被各层 lilToon 遮罩覆写），根本不是基础贴图。
+                // 实测后果：Shinano_face 烘出的发射贴图 R/B = 0.639，而 lil 渲染出来是 0.857、
+                // 源 _EmissionColor 本身是 0.844 ⇒ R 被压低约 7%，颜色偏青（用户对比图可见）。
+                // 现改为直接读 _MainTex（shinano 走"直接沿用原贴图"分支，与 lil 的 fd.col 完全等价）。
+                // ------------------------------------------------------------------
+                Color[] albedoPixels = null;
+                var mainTex = ShaderUtility.HasProperty(lilToonMaterial, "_MainTex")
+                    ? lilToonMaterial.GetTexture("_MainTex") as Texture2D
+                    : null;
+                var mainColor = ShaderUtility.HasProperty(lilToonMaterial, "_Color")
+                    ? lilToonMaterial.GetColor("_Color")
+                    : Color.white;
+                if (mainTex != null)
+                {
+                    if (!ReadPixels(mainTex, out albedoPixels, out var albedoW, out var albedoH, log, "自发光用的基础贴图"))
+                        albedoPixels = null;
+                    else if (albedoW != width || albedoH != height)
+                    {
+                        // 分辨率不同：按最近邻重采样到遮罩尺寸
+                        var resampled = new Color[width * height];
+                        for (var yy = 0; yy < height; yy++)
+                        {
+                            var syy = Mathf.Clamp(yy * albedoH / height, 0, albedoH - 1);
+                            for (var xx = 0; xx < width; xx++)
+                            {
+                                var sxx = Mathf.Clamp(xx * albedoW / width, 0, albedoW - 1);
+                                resampled[yy * width + xx] = albedoPixels[syy * albedoW + sxx];
+                            }
+                        }
+                        albedoPixels = resampled;
+                    }
+                    if (albedoPixels != null && log != null)
+                        log.Mapped("自发光用的 albedo", mainTex.name + " × _Color(" +
+                            mainColor.r.ToString("0.##") + "," + mainColor.g.ToString("0.##") + "," + mainColor.b.ToString("0.##") + ")" +
+                            "（对齐 lil 的 fd.albedo = fd.col.rgb，光照之前的基色）");
+                }
+
                 var emissionBlend = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionBlend")
                     ? lilToonMaterial.GetFloat("_EmissionBlend")
-                    : 1f;
-                var emissionMainStrength = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionMainStrength")
+                    : 1f;                var emissionMainStrength = ShaderUtility.HasProperty(lilToonMaterial, "_EmissionMainStrength")
                     ? Mathf.Clamp01(lilToonMaterial.GetFloat("_EmissionMainStrength"))
                     : 0f;
 
@@ -323,7 +369,10 @@ namespace NonToonSwitcher
                                 em = new Vector3(em.x * k, em.y * k, em.z * k);
                             }
                             // 朝"自发光 × 基础色"插值（lil: lerp(emission, emission * albedo, _EmissionMainStrength)）
-                            var albedo = pixels[y * width + x];
+                            var albedo = albedoPixels != null
+                                ? albedoPixels[y * width + x]
+                                : Color.white;
+                            albedo = new Color(albedo.r * mainColor.r, albedo.g * mainColor.g, albedo.b * mainColor.b, 1f);
                             em = new Vector3(
                                 Mathf.Lerp(em.x, em.x * albedo.r, emissionMainStrength),
                                 Mathf.Lerp(em.y, em.y * albedo.g, emissionMainStrength),
