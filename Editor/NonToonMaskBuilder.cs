@@ -810,6 +810,25 @@ namespace NonToonSwitcher
                 AssetDatabase.WriteImportSettingsIfDirty(scmaskPath);
                 importer.SaveAndReimport();
 
+                // ★ 兜底：直接把 .scmask.meta 里的 format 改成 4（TextureFormat.RGBA32）。
+                //
+                // 为什么必须这么做（有实测依据）：ScriptedImporter 实例经 SaveAndReimport 后会用
+                // **序列化过的原始值**重跑 OnImportAsset，所以上面用反射 SetValue 设的 RGBA32 不生效——
+                // 实测 meta 里仍然是 "format: 25"（BC7），读回的贴图格式仍是 RGB24，且遮罩内容被
+                // BC7 块压缩糊开（非零像素 64446，而发射贴图只有 6781）⇒ 渲染偏色。
+                // 唯一可靠的办法是写进 meta 文本本身，再让它重新导入。
+                if (File.Exists(metaPath))
+                {
+                    var metaText2 = File.ReadAllText(metaPath);
+                    var replaced = System.Text.RegularExpressions.Regex.Replace(metaText2, @"(?m)^(\s*format:\s*)\d+", "${1}4");
+                    if (replaced != metaText2)
+                    {
+                        File.WriteAllText(metaPath, replaced);
+                        AssetDatabase.ImportAsset(scmaskPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+                        if (log != null) log.Mapped("共享遮罩格式", "已写入 meta：format=4（RGBA32 无损，原本是 25=BC7 有损）");
+                    }
+                }
+
                 // 写完后校验一次：.meta 里的 R 通道必须指向本次的发射贴图，
                 // 否则 shader 读到的还是旧内容（实测踩过：.meta 时间戳没变 ⇒ 渲染偏色）。
                 var metaOnDisk = full + ".meta";
