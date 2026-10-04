@@ -744,14 +744,21 @@ namespace NonToonSwitcher
                 // 不这么做的话只有两条坏路：
                 //   · 暗端 min(1, k) ⇒ k>1 时整条变纯白 ⇒ 毫无明暗、法线完全不可见（这就是原 bug）
                 //   · 暗端不钳 ⇒ 贴图存不下 >1 ⇒ 被硬件钳成白 ⇒ 同上
-                // 补偿量由本函数算出（ratioFaithful 为 true 时生效），见 shadowRatio 的计算处
+
+                var mix = Mathf.Lerp(1f, s1, strength);
+                rgb = Color.Lerp(rgb, Color.white, mix);
+
+                // ★ 比值忠实化：必须放在"受光端回白"的 lerp **之后**。
+                //
+                // 放在之前会出错（实测，开衫）：亮端会被 lerp 重新拉回白色，
+                // 只有暗端被除小 ⇒ 对比度被夸大近两倍（实测色带线性对比 0.87，而 lilToon 只有 0.33 的量级）。
+                // 放在之后，整条色带（含受光端）一起除 ⇒ 明暗**比值**保持不变、
+                // 整体暗 shadowRatio 倍，由主光补回。
                 if (ratioFaithful && shadowRatio > 1.0001f)
                 {
                     rgb = new Color(rgb.r / shadowRatio, rgb.g / shadowRatio, rgb.b / shadowRatio, 1f);
                 }
 
-                var mix = Mathf.Lerp(1f, s1, strength);
-                rgb = Color.Lerp(rgb, Color.white, mix);
                 colorKeys.Add(new GradientColorKey(rgb, x));
             }
 
