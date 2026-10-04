@@ -670,6 +670,15 @@ namespace NonToonSwitcher
 
             var avgAlbedo = AverageAlbedo(material, log, "_ShadowColor 换算用的");
 
+            // 阴影色 / 平均底色 的最大通道比 —— 见下面"比值忠实化"的说明
+            var shadowRatio = 0f;
+            {
+                var maxRgb = Mathf.Max(first.r, Mathf.Max(first.g, first.b));
+                if (use2) maxRgb = Mathf.Max(maxRgb, Mathf.Max(secondRgb.r, Mathf.Max(secondRgb.g, secondRgb.b)));
+                var minAlb = Mathf.Max(0.0001f, Mathf.Min(avgAlbedo.r, Mathf.Min(avgAlbedo.g, avgAlbedo.b)));
+                shadowRatio = maxRgb / minAlb;
+            }
+
             var colorKeys = new List<GradientColorKey>();
             var last = float.NaN;
             foreach (var x in stops)
@@ -723,6 +732,23 @@ namespace NonToonSwitcher
                 // 让跨度回到 lil 的量级；亮端受 lightColor 上限约束，靠主光补正那条一起抬。
                 var darkEnd = Mathf.Lerp(NonToonSwitcherSettings.instance.GradientDarkEnd, 1f, x);
                 rgb = new Color(rgb.r * darkEnd, rgb.g * darkEnd, rgb.b * darkEnd, 1f);
+
+                // ★ 比值忠实化（方案 A 的核心）
+                //
+                // 背景：NonToon 的 Shade 是**乘算** `sd.col.rgb *= ramp(shade)`，而 lilToon 的阴影是
+                // **替换** `col = lerp(indirectCol, directCol, lns)`。要把 lil 的"绝对阴影色"塞进
+                // 一个 0..1 的乘数里，只能保留**比值**：若某材质 shadow/avgAlbedo = k > 1，
+                // 就把整条色带除以 k（暗端与亮端同除）——明暗比例完全忠实，
+                // 代价是整体暗了 k 倍；这由 MainLight 模块按同样的 k 补回来（有据可依，不是魔法值）。
+                //
+                // 不这么做的话只有两条坏路：
+                //   · 暗端 min(1, k) ⇒ k>1 时整条变纯白 ⇒ 毫无明暗、法线完全不可见（这就是原 bug）
+                //   · 暗端不钳 ⇒ 贴图存不下 >1 ⇒ 被硬件钳成白 ⇒ 同上
+                var ratioK = NonToonTextureBaker.ShadeRatioCompensation;
+                if (ratioK > 0.0001f)
+                {
+                    rgb = new Color(rgb.r / ratioK, rgb.g / ratioK, rgb.b / ratioK, 1f);
+                }
 
                 var mix = Mathf.Lerp(1f, s1, strength);
                 rgb = Color.Lerp(rgb, Color.white, mix);
@@ -831,6 +857,15 @@ namespace NonToonSwitcher
             var span = Mathf.Max(max - min, 0.0001f);
             return Mathf.Clamp01((value - min) / span);
         }
+
+        /// <summary>
+        /// 色带"比值忠实化"的开关（方案 A）。
+        /// 1 = 不做补偿，色带暗端直接用阴影色（当前行为）；
+        /// &gt;1 = 把整条色带除以该值 ⇒ 明暗**比值**与 lilToon 一致（因为 NonToon 是乘算、lilToon 是替换），
+        /// 代价是整体暗了同样的倍数，由主光补回来。
+        /// 由转换器按材质算出 shadow/avgAlbedo 后临时设置，不写进材质属性。
+        /// </summary>
+        internal static float ShadeRatioCompensation = 1f;
 
         private static Gradient BuildRimShadeGradient(Material material)
         {
@@ -1012,4 +1047,3 @@ namespace NonToonSwitcher
 // touch r29
 
 // touch r31b
-
