@@ -739,7 +739,6 @@ namespace NonToonSwitcher
             }
 
             var gradient = new Gradient();
-            EnsureGradientDirection(colorKeys);
             gradient.SetKeys(colorKeys.ToArray(), new[]
             {
                 new GradientAlphaKey(1f, 0f),
@@ -816,33 +815,6 @@ namespace NonToonSwitcher
         }
 
         /// <summary>lilToon 的 <c>lilTooningNoSaturateScale(value, border, blur)</c>：过渡窗口 [border ± blur/2]。</summary>
-        /// <summary>
-        /// Gradient direction guard.
-        ///
-        /// NonToon's Shade samples _SharedGradients by the LIGHTING amount, so x=0 must be the DARK end
-        /// and x=1 the lit end. Measured on Shinano_face: the generated ramp had 0.982 at x=0 and the
-        /// dark value 0.77 at x=0.6..1 - i.e. reversed - so the shadow side sampled the brightest value.
-        /// That is exactly the reported symptom: "the face glows in shadow and takes no shadow at all".
-        /// This guard mirrors the ramp if the two ends are the wrong way round.
-        /// </summary>
-        private static void EnsureGradientDirection(List<GradientColorKey> keys)
-        {
-            if (keys == null || keys.Count < 2) return;
-            keys.Sort((a, b) => a.time.CompareTo(b.time));
-            var lumFirst = 0.2126f * keys[0].color.r + 0.7152f * keys[0].color.g + 0.0722f * keys[0].color.b;
-            var lumLast = 0.2126f * keys[keys.Count - 1].color.r + 0.7152f * keys[keys.Count - 1].color.g + 0.0722f * keys[keys.Count - 1].color.b;
-            if (lumFirst > lumLast + 0.001f)
-            {
-                for (var i = 0; i < keys.Count; i++)
-                {
-                    var k = keys[i];
-                    keys[i] = new GradientColorKey(k.color, 1f - k.time);
-                }
-                keys.Sort((a, b) => a.time.CompareTo(b.time));
-            }
-        }
-
-
         private static float TooningWindow(float value, float border, float blur)
         {
             var min = Mathf.Clamp01(border - blur * 0.5f);
