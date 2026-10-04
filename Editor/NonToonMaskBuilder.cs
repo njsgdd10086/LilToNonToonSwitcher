@@ -614,7 +614,11 @@ namespace NonToonSwitcher
                     // 峰值仅 0.29），于是所有读 R/G/B 通道的模块门控全部变成 0 ⇒ 
                     // 用户实测「ShadeReplace 勾不勾都没效果」「Lighten 拉高 boost 也没效果」。
                     // 用户满意的那一版，遮罩 R/G/B 里是**有内容的**（实测呈洋红），模块才能工作。
-                    paramType.GetField("tex", flags).SetValue(param, mask);
+                    // R/G/B 挂**发射贴图**（加算型自动光的唯一可达通道），A 挂真正的遮罩。
+                    // 关键前提：发射贴图本身是**稀疏**的（实测只有眼睛约 2.3% 的像素非零、
+                    // 均值 0.005）⇒ 加算后只点亮眼睛，不会像早期那版（遮罩 R/G/B 整片洋红）
+                    // 那样给全身加色。用户要的正是「无光照时眼睛仍发光」这个效果。
+                    paramType.GetField("tex", flags).SetValue(param, emission);
                     var modeField = paramType.GetField("mode", flags);
                     modeField.SetValue(param, Enum.Parse(modeField.FieldType, names[i]));
                     paramType.GetField("fallbackValue", flags).SetValue(param, 0f);
