@@ -210,6 +210,11 @@ namespace NonToonSwitcher
                     new GUIContent("色调增益",
                         "配合 gamma 的整体乘数（先 gamma 再乘它）。1 = 不乘。"),
                     settings.ToneCurveGain, 0.2f, 4f);
+                settings.EmissionDesaturate = EditorGUILayout.Slider(
+                    new GUIContent("自发光去饱和",
+                        "0 = 完全使用源材质的 _EmissionColor（最忠实，但 HDR 偏色会露出来，例如 shinano 的 (1.789,1.919,2.119) 会呈淡紫）；" +
+                        "1 = 完全去色（中性白，但会失去源色相）。默认 0.5 折中。改完需要重新转换。"),
+                    settings.EmissionDesaturate, 0f, 1f);
                 EditorGUILayout.BeginHorizontal();
                 if (GUILayout.Button(new GUIContent("默认（最忠实）",
                         "以上全部设为 1：完全照搬 lilToon 的参数，不做任何观感补偿。\n" +

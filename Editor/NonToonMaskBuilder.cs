@@ -271,7 +271,7 @@ namespace NonToonSwitcher
                         // 半去饱和：保留一半原始色相（用户反馈"完全去饱和后颜色是灰的"），
                         // 同时压掉一半偏色（此前全用原色时高光偏青/偏紫）。
                         // 0.5 = 折中；要更忠实就往 0 调、要更中性就往 1 调。
-                        const float Desaturate = 0.5f;
+                        var Desaturate = NonToonSwitcherSettings.instance.EmissionDesaturate;
                         emissionColor = new Color(
                             Mathf.Lerp(emissionColor.r, lum, Desaturate),
                             Mathf.Lerp(emissionColor.g, lum, Desaturate),

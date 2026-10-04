@@ -47,6 +47,7 @@ namespace NonToonSwitcher
         [SerializeField] private float baseExposure = 1f;
         [SerializeField] private float toneCurveGamma = 1f;
         [SerializeField] private float toneCurveGain = 1f;
+        [SerializeField] private float emissionDesaturate = 0.5f;
 
         /// <summary>lilToon 描边宽度贴图的补偿：描边整体后移 = 描边宽度 × 0.01 × 这个倍数。</summary>
         public const float DefaultOutlineZOffsetFactor = 1f;
@@ -102,6 +103,17 @@ namespace NonToonSwitcher
         {
             get { return toneCurveGain <= 0f ? 1f : toneCurveGain; }
             set { toneCurveGain = Mathf.Clamp(value, 0.2f, 4f); SaveSettings(); }
+        }
+
+        /// <summary>
+        /// 自发光去饱和量。0 = 完全用源 _EmissionColor（最忠实，但 HDR 偏色会露出来：
+        /// shinano 的 (1.789, 1.919, 2.119) 会呈淡紫）；1 = 完全去色（中性白，会丢源色相）。
+        /// 默认 0.5 折中。改完需要重新转换。
+        /// </summary>
+        public float EmissionDesaturate
+        {
+            get { return Mathf.Clamp01(emissionDesaturate); }
+            set { emissionDesaturate = Mathf.Clamp01(value); SaveSettings(); }
         }
 
         public bool CreateMenuToggle
