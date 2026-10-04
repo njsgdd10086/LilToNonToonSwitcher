@@ -354,17 +354,19 @@ namespace NonToonSwitcher
                 // 形状为 null 时**不能跳过发光**：lil 在两个 LIL_FEATURE_* 都不成立时，emissionColor 保持
                 // _EmissionColor 不变（既没乘 _EmissionMap 也没乘 _EmissionBlendMask），照样按
                 // emissionBlend = _EmissionBlend * emissionColor.a 加算 ⇒ 表现为**均匀铺满整块材质**。
-                // 所以这里造一张 1x1 白图当作"没有贴图"的形状，与 lil 的语义完全一致。
-                var effectiveShape = shapeTexture;
-                if (effectiveShape == null)
+                // 所以这里不造临时贴图（那条路实测会失败、输出全零），而是直接在循环里把 m 当成纯白。
+                Color[] mapPixels = null;
+                var mapWidth = 1;
+                var mapHeight = 1;
+                var hasShapeTexture = shapeTexture != null &&
+                    ReadPixels(shapeTexture, out mapPixels, out mapWidth, out mapHeight, log, "自发光形状");
+                if (!hasShapeTexture)
                 {
-                    effectiveShape = new Texture2D(1, 1, TextureFormat.RGBA32, false);
-                    ((Texture2D)effectiveShape).SetPixel(0, 0, Color.white);
-                    ((Texture2D)effectiveShape).Apply();
+                    mapPixels = new[] { Color.white };
+                    mapWidth = 1;
+                    mapHeight = 1;
                 }
 
-                if (effectiveShape != null &&
-                    ReadPixels((Texture2D)effectiveShape, out var mapPixels, out var mapWidth, out var mapHeight, log, "自发光形状"))
                 {
                     Color[] maskPixels2 = null;
                     var maskWidth2 = 0;
@@ -428,7 +430,7 @@ namespace NonToonSwitcher
                                "，主色强度 " + emissionMainStrength.ToString("0.###") + "，混合 " + emissionBlend.ToString("0.###") + "）",
                                "写入共享遮罩的 R/G/B 通道");
                 }
-                else
+                if (false)
                 {
                     emissionStrengthForKeyword = 0f;
                     if (pixels != null)
