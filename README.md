@@ -334,10 +334,11 @@ LilToNonToonSwitcher/
 ## 九、开源说明
 
 - 许可证：**MIT**（见 [LICENSE](LICENSE)）。
-- 本项目的**代码为独立实现**，没有复制其他转换工具的源码。转换思路参考了社区同类工具
+- 本项目的**编辑器转换代码为独立实现**，没有复制其他转换工具的源码。转换思路参考了社区同类工具
   （例如 BOOTH 上的 *lil to non toon converter*）以及 lilToon / NonToon / Shader Core 公开的
   shader 与编辑器脚本行为。
-- 依赖的第三方项目均属其各自作者，本仓库不包含它们的代码：
+- 兼容模块适配了 lilToon / NonToon 的公开采样与混合公式，来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 依赖的第三方项目均属其各自作者：
   [lilToon](https://github.com/lilxyzw/lilToon)、[NonToon](https://github.com/lilxyzw/NonToon)、
   [Shader Core](https://github.com/lilxyzw/Shader-Core)、
   [Modular Avatar](https://github.com/bdunderscore/modular-avatar)。

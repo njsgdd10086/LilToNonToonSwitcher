@@ -178,7 +178,7 @@ namespace NonToonSwitcher
                     destination.SetFloat(name, source.GetFloat(name));
                     return true;
                 case UnityEngine.Rendering.ShaderPropertyType.Int:
-                    destination.SetInt(name, Mathf.RoundToInt(source.GetFloat(name)));
+                    destination.SetInteger(name, source.GetInteger(name));
                     return true;
                 case UnityEngine.Rendering.ShaderPropertyType.Range:
                     destination.SetFloat(name, source.GetFloat(name));
@@ -196,7 +196,7 @@ namespace NonToonSwitcher
         public static bool SetFloatValue(Material destination, string name, float value)
         {
             if (!HasProperty(destination, name)) return false;
-            if (IsIntegerProperty(destination.shader, name)) destination.SetInt(name, Mathf.RoundToInt(value));
+            if (IsIntegerProperty(destination.shader, name)) destination.SetInteger(name, Mathf.RoundToInt(value));
             else destination.SetFloat(name, value);
             return true;
         }
@@ -204,20 +204,17 @@ namespace NonToonSwitcher
         public static bool SetIntValue(Material destination, string name, int value)
         {
             if (!HasProperty(destination, name)) return false;
-            destination.SetInt(name, value);
+            if (IsIntegerProperty(destination.shader, name)) destination.SetInteger(name, value);
+            else destination.SetFloat(name, value);
             RecentInts[Key(destination, name)] = value;
             return true;
         }
 
         // ------------------------------------------------------------------ integer properties
         //
-        // Unity does not persist Material.SetInt() for integer shader properties of Shader Core shaders:
-        // the call succeeds and Material.GetInt() reads the value back, but AssetDatabase.SaveAssets()
-        // writes the property default to the .mat file. The same applies in reverse - a .mat that really
-        // contains "_RenderingMode: 2" reads back as 0.
-        //
-        // The serialized property list is authoritative (it is what the shader reads and what NonToon's
-        // own inspector writes), so integer properties are read and written through SerializedObject here.
+        // ShaderPropertyType.Int requires SetInteger/GetInteger. SetInt uses float storage
+        // and can conflict with integer entries already present in the material property sheet.
+        // Keep serialized integer readback for existing assets and the conversion-session cache.
 
         private static SerializedObject GetSerialized(Material material)
         {
@@ -294,7 +291,8 @@ namespace NonToonSwitcher
         public static bool SetIntPersistent(Material material, string name, int value)
         {
             if (material == null || !HasProperty(material, name)) return false;
-            material.SetInt(name, value);
+            if (IsIntegerProperty(material.shader, name)) material.SetInteger(name, value);
+            else material.SetFloat(name, value);
             RecentInts[Key(material, name)] = value;
 
             try

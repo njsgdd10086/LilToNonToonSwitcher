@@ -72,6 +72,11 @@ namespace NonToonSwitcher
             };
 
 
+            // Compatible MatCaps sample their independent RGB masks directly.
+            if (nonToonMaterial.HasProperty(NonToonSurfaceCompatibility.Prefix + "LilCompatible") &&
+                nonToonMaterial.GetFloat(NonToonSurfaceCompatibility.Prefix + "LilCompatible") > 0.5f)
+                sources.RemoveAll(s => s.LilToonProperty.StartsWith("_MatCap", StringComparison.Ordinal));
+
             // 注意：**不能在这里检查文件是否存在**。发射贴图是本次 Bake 后面才写出来的，
             // 首次转换时文件还不存在 ⇒ 会被误判为"没有自发光" ⇒ 把 R/G/B 清成 0（实测：
             // 脸部遮罩 RGB 峰值变成 0，无光照下眼睛完全不亮）。真正的判据是下面自发光块里
@@ -998,7 +1003,7 @@ namespace NonToonSwitcher
                     // _SharedMask 画面即恢复正常，身体出现洋红/黄色块就是它造成的）。
                     // **R/G/B 必须挂真正的遮罩内容**，不能挂自发光！
                     // 实测教训：曾经把自发光写进 R/G/B，而自发光数据几乎全黑（均值 0.005、
-                    // 峰值仅 0.29），于是所有读 R/G/B 通道的模块门控全部变成 0 ⇒ 
+                    // 峰值仅 0.29），于是所有读 R/G/B 通道的模块门控全部变成 0 ⇒
                     // 用户实测「ShadeReplace 勾不勾都没效果」「Lighten 拉高 boost 也没效果」。
                     // 用户满意的那一版，遮罩 R/G/B 里是**有内容的**（实测呈洋红），模块才能工作。
                     // R/G/B 挂**发射贴图**（加算型自动光的唯一可达通道），A 挂真正的遮罩。
@@ -1152,4 +1157,3 @@ namespace NonToonSwitcher
 
 
 // touch 639266620481517736
-

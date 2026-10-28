@@ -1,0 +1,5 @@
+{
+    "name": "lilToon Surface Compatibility",
+    "uniqueID": "com.nontoon.switcher.surface",
+    "afters": ["MatCaps"]
+}

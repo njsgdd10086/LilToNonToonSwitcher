@@ -1,5 +1,14 @@
 # 更新日志
 
+## [Unreleased]
+
+### 修复
+
+- 转换时安装独立的 SurfaceCompatibility 模块，保留两层 MatCap 各自的开关、混合模式、Alpha、强度、RGB 遮罩、模糊与光照参数；不再依靠归一化 HDR 颜色补偿混合语义差异。
+- 只在描边通道单位化蒙皮外扩方向，并保留宽度遮罩、距离修正及顶点色宽度模式，避免缩放后的法线将描边放大。
+- 使用 SetInteger/GetInteger 访问 Int shader 属性，避免与 float property sheet 冲突。
+- 提供不依赖付费模型或 Unity MCP 的 Editor 渲染回归检查。
+
 ## [1.3.3] - 2025-10-05
 
 ### 修复
