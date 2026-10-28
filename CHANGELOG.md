@@ -1,6 +1,6 @@
 # 更新日志
 
-## [Unreleased]
+## [1.4.0] - 2026-10-28
 
 ### 修复
 
@@ -8,6 +8,16 @@
 - 只在描边通道单位化蒙皮外扩方向，并保留宽度遮罩、距离修正及顶点色宽度模式，避免缩放后的法线将描边放大。
 - 使用 SetInteger/GetInteger 访问 Int shader 属性，避免与 float property sheet 冲突。
 - 提供不依赖付费模型或 Unity MCP 的 Editor 渲染回归检查。
+
+### 变更
+- **依赖下限提升到 0.3.0**：`jp.lilxyzw.shadercore` / `jp.lilxyzw.nontoon` / `com.nontoon.modules`
+  均由 `>=0.1.x` 提高到 `>=0.3.0`。兼容模块用到 Shader Core 0.3.0 的特性（`SC_ScaleOffset`、
+  `__SC_PHASE_morph__` 等），旧版本无法编译。升级前请先在 VCC/ALCOM 里把这三项更新到 0.3.0。
+
+### 致谢
+- 本版对 MatCap 与描边语义的修复来自 [@CatAndLing](https://github.com/CatAndLing) 的
+  [PR #2](https://github.com/njsgdd10086/LilToNonToonSwitcher/pull/2) 与
+  [issue #1](https://github.com/njsgdd10086/LilToNonToonSwitcher/issues/1) 的复现数据。
 
 ## [1.3.3] - 2025-10-05
 
