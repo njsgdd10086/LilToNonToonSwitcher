@@ -21,3 +21,22 @@ Tools / LilToNonToon Switcher / 验证 MatCap 与描边
 ~~~text
 python scripts/validate_package.py --root .
 ~~~
+
+## 转换前体检（手工回归）
+
+点下转换后、真正动手之前会先跑一次只读体检，检查两类「改材质 / 改 shader 都救不回来」的问题：
+
+1. 渲染器 `Mesh Renderer → 照明 → 接受阴影` 没勾（这些部位在阴影里永远不会变暗）；
+2. 材质渲染队列落在 Unity 的透明通道（**大于 2500**）。BIRP 的透明通道拿不到 `SHADOWS_SCREEN`，
+   这些材质在阴影里会保持满亮度 —— 典型来源是源 lilToon 材质手工改过 `Custom Render Queue`，
+   例如 `3000`（lilToon 的 `TwoPassTransparent` 默认只有 `2460`）。
+
+命中时：Console 输出一段醒目富文本警告、弹窗确认（批处理下不弹窗），并写进转换结果。
+转换器**不会**替你改渲染队列 —— 忠实照搬源材质的值，需要按提示手动改。
+
+验证方法：
+
+1. 选一个含上述情况的模型执行转换：转换开始前就应该弹出警告窗，Console 里有同内容的彩色色块。
+2. 转换结果里该材质的 `renderQueue` 应与源材质**一致**（例如仍是 `3000`，不会被自动改掉）。
+3. 按提示把该材质的 Render Queue 手动改到 `≤2500`（Shader Core 下拉框选 AlphaTest=2450，或直接填 2500），
+   再到 `lilAvatarUtils → 光照 → 在阴影中` 确认它与脸、头发一样被压暗。

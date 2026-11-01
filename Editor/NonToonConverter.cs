@@ -60,14 +60,14 @@ namespace NonToonSwitcher
         // ------------------------------------------------------------------ discovery
 
         /// <summary>
-        /// 扫描目标上的渲染器，把「接受阴影 / 投射阴影」被关掉的情况报进转换结果。
+        /// 扫描目标上的渲染器，把「接受阴影 / 投射阴影」被关掉的情况报出来。
         ///
         /// 为什么要报：这两个开关在 Mesh Renderer 的「照明」分组里，**关掉后任何着色器都收不到阴影**，
         /// 表现是"脸在阴影里始终很亮、完全不接受阴影"。实测排查成本极高（材质、色带、着色器相位全都
         /// 看起来正常），最后发现只是 Mesh Renderer 上的 Receive Shadows 没勾。
-        /// 这里在转换时直接提示，并在日志里指出具体对象名，便于定位。
+        /// 现在改为在转换开始前就报，并指出具体对象名。
         /// </summary>
-        private static void CheckRendererShadowFlags(List<Renderer> renderers, ConversionResult result)
+        private static void CheckRendererShadowFlags(List<Renderer> renderers, List<string> warnings)
         {
             if (renderers == null) return;
             var noReceive = new List<string>();
@@ -84,15 +84,91 @@ namespace NonToonSwitcher
             }
             if (noReceive.Count > 0)
             {
-                result.Warnings.Add("有 " + noReceive.Count + " 个渲染器的 Mesh Renderer → 照明 → **接受阴影** 没有勾选，" +
-                                    "这些部位在阴影里永远不会变暗（跟着色器无关，改材质也没用）：" +
-                                    string.Join("、", noReceive.ToArray()));
+                warnings.Add("有 " + noReceive.Count + " 个渲染器的 Mesh Renderer → 照明 →「接受阴影」没有勾选，" +
+                             "这些部位在阴影里永远不会变暗（跟着色器无关，改材质也没用）。" +
+                             "手动勾上即可，涉及：" + string.Join("、", noReceive.ToArray()));
             }
             if (noCast.Count > 0)
             {
-                result.Warnings.Add("有 " + noCast.Count + " 个渲染器的**投射阴影**是 Off（它们不会在地上投出影子，通常是有意为之）：" +
-                                    string.Join("、", noCast.ToArray()));
+                warnings.Add("有 " + noCast.Count + " 个渲染器的「投射阴影」是 Off（它们不会在地上投出影子，通常是有意为之）。" +
+                             "涉及：" + string.Join("、", noCast.ToArray()));
             }
+        }
+
+        /// <summary>
+        /// 材质层面的同类问题：渲染队列落进 Unity 的透明通道（&gt; <see cref="ShadowCapableQueueMax"/>）。
+        /// BIRP 的透明通道收不到屏幕空间阴影 ⇒ 该材质在阴影里保持满亮度（整身都暗、只有它不暗）。
+        /// 转换会如实照搬这个队列，所以这里**只报不改**：转换完由使用者手动把 Render Queue 调回 ≤2500。
+        /// </summary>
+        private static void CheckTransparentRenderQueue(List<Renderer> renderers, List<string> warnings)
+        {
+            if (renderers == null) return;
+            var found = new List<string>();
+            var seen = new List<Material>();
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null) continue;
+                foreach (var material in renderer.sharedMaterials)
+                {
+                    if (material == null || seen.Contains(material)) continue;
+                    seen.Add(material);
+                    var queue = material.renderQueue;
+                    if (queue <= ShadowCapableQueueMax) continue;
+                    found.Add(material.name + "（队列 " + queue + "，用于 " + renderer.gameObject.name + "）");
+                }
+            }
+            if (found.Count == 0) return;
+            warnings.Add("有 " + found.Count + " 个材质的渲染队列落在 Unity 的透明通道（大于 " +
+                         ShadowCapableQueueMax + "），BIRP 的透明通道收不到屏幕空间阴影 ⇒ 这些材质在阴影里会保持满亮度。" +
+                         "转换会如实照搬这个队列，所以转换后请手动把材质的 Render Queue 改到 ≤ " +
+                         ShadowCapableQueueMax + "（Shader Core 的下拉框可直接选 AlphaTest=2450，或直接填数值 " +
+                         ShadowCapableQueueMax + "）。" +
+                         "涉及：" + string.Join("、", found.ToArray()));
+        }
+
+        /// <summary>
+        /// 转换前体检：**只读**扫描，不修改任何东西。返回「再怎么调材质也救不回来」的两类问题
+        /// （渲染器没勾接受阴影 / 材质渲染队列进了透明通道）。两类都表现为"某个部位在阴影里不变暗"，
+        /// 而看 shader、色带、遮罩都查不出来，所以放在转换动手之前先报。
+        /// </summary>
+        public static List<string> PreflightScan(GameObject[] targets, bool includeInactive)
+        {
+            var warnings = new List<string>();
+            if (targets == null || targets.Length == 0) return warnings;
+            var renderers = new List<Renderer>();
+            foreach (var target in targets) CollectRenderers(target, includeInactive, renderers);
+            CheckRendererShadowFlags(renderers, warnings);
+            CheckTransparentRenderQueue(renderers, warnings);
+            return warnings;
+        }
+
+        /// <summary>把体检结果拼成一段醒目的 Console 文本（Unity 控制台支持富文本）。</summary>
+        public static string BuildPreflightText(List<string> warnings)
+        {
+            if (warnings == null || warnings.Count == 0) return string.Empty;
+            const string rule = "■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■";
+            var lines = new List<string>();
+            lines.Add("<b><color=#FF4444>" + rule + "</color></b>");
+            lines.Add("<b><color=#FF8800>⚠⚠⚠ 转换前警告：下面这些问题改材质 / 改 shader 都没用，必须手动改对象或材质" +
+                      "（共 " + warnings.Count + " 项）</color></b>");
+            for (var i = 0; i < warnings.Count; i++)
+            {
+                lines.Add("<b><color=#FFCC00>【" + (i + 1) + "】</color>" + warnings[i] + "</b>");
+            }
+            lines.Add("<b><color=#FF4444>" + rule + "</color></b>");
+            return string.Join("\n", lines.ToArray());
+        }
+
+        /// <summary>弹窗用的纯文本版本（弹窗不解析富文本）。</summary>
+        public static string BuildPreflightPlainText(List<string> warnings)
+        {
+            if (warnings == null || warnings.Count == 0) return string.Empty;
+            var lines = new List<string>();
+            for (var i = 0; i < warnings.Count; i++)
+            {
+                lines.Add("【" + (i + 1) + "】" + warnings[i]);
+            }
+            return string.Join("\n\n", lines.ToArray());
         }
 
 
@@ -701,8 +777,24 @@ namespace NonToonSwitcher
         }
 
         /// <summary>
+        /// BIRP 下队列 ≥ 2501 的材质会被放进**透明通道**绘制，而透明通道拿不到 `SHADOWS_SCREEN`
+        /// （屏幕空间阴影只给不透明通道），于是该材质在阴影里保持满亮度。观感就是"整身都暗了、
+        /// 只有这件衣服还亮着"，很容易被误判成 shader 算错。
+        ///
+        /// 实测（milfy_test.unity，Onepiece_nontoon，同一材质只改队列，其余不动）：
+        /// 队列 3000 → 阴影/受光亮度比 96%（完全不暗）、2501 → 96%、2500 → 26%、
+        /// 2450/2000 → 26%（与脸、头发一致）。2500 = `RenderQueue.GeometryLast` 是分界点。
+        ///
+        /// 转换器**不改**这个值（忠实照搬作者调过的队列），只在转换开始前由
+        /// <see cref="PreflightScan"/> 报出来，由使用者自己决定要不要手动改。
+        /// </summary>
+        public const int ShadowCapableQueueMax = (int)RenderQueue.GeometryLast;
+
+        /// <summary>
         /// 渲染队列：原材质自己设过就照搬；否则用原 shader 声明的队列（lilToon 的透明变体是 2460、
         /// 镂空 2450、不透明 2000、宝石 2900）；两者都没有才退回 NonToon 的模式默认值。
+        /// 超过 <see cref="ShadowCapableQueueMax"/> 的值也**原样照搬**（忠实转换），
+        /// 由转换前的体检负责警告，这里不做任何 clamp。
         /// </summary>
         private static int ResolveRenderQueue(Material source, int resolved)
         {
@@ -848,6 +940,24 @@ namespace NonToonSwitcher
                 return result;
             }
 
+            // 转换前体检：在动手之前就把「改材质也救不回来」的问题喊出来（控制台醒目提示 + 进结果警告列表）。
+            // 放在这里（而不是转换途中）是有意的 —— 一旦开始转换就很难分辨"哪些是原本就有的问题"。
+            var preflight = PreflightScan(request.Targets, request.IncludeInactive);
+            if (preflight.Count > 0)
+            {
+                foreach (var issue in preflight) result.Warnings.Add(issue);
+                if (settings.LogToConsole) Debug.LogWarning(BuildPreflightText(preflight));
+
+                // 弹窗是最后一道保险（控制台很容易被忽略）。批处理 / CI 下不弹，免得卡住自动化。
+                if (!Application.isBatchMode)
+                {
+                    EditorUtility.DisplayDialog("⚠ 转换前警告（转换仍会照常进行）",
+                        BuildPreflightPlainText(preflight) +
+                        "\n\n上面这些问题转换器不会替你改，需要手动处理。详情见 Console。",
+                        "知道了，继续转换");
+                }
+            }
+
             // Shader generation imports assets and must finish before StartAssetEditing.
             var compatibilityLog = new ConversionLog();
             if (!NonToonSurfaceCompatibility.EnsureInstalled(compatibilityLog))
@@ -870,12 +980,6 @@ namespace NonToonSwitcher
             // 1. find everything that has to be converted
             var renderers = new List<Renderer>();
             foreach (var target in request.Targets) CollectRenderers(target, request.IncludeInactive, renderers);
-
-            // 渲染器层面的常见坑：Mesh Renderer 上的「接受阴影」没勾时，**任何着色器都不会收到阴影**，
-            // 表现是"脸在阴影里一直很亮、完全不接受阴影"，但查代码/材质/着色器都查不出来。
-            // 实测踩过：用户找了很久，最后发现是模型上某个 Mesh Renderer 的 Receive Shadows 没开。
-            // 所以转换时就把它报出来，省得以后再去翻 Mesh Renderer。
-            CheckRendererShadowFlags(renderers, result);
 
             var materials = new List<Material>();
             foreach (var renderer in renderers)
