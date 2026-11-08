@@ -135,6 +135,11 @@ namespace NonToonSwitcher
             MapFloat("_AlphaToMask", "_AlphaToMask", "AlphaToMask 透明覆盖");
 
             // ----- normal map -----
+            // ⚠ NonToon 的 `_NormalMap` **忽略 `_NormalMap_ST`**：`NonToon_properties.hlsl` 里它没有
+            // `SC_ScaleOffset`，`birp.hlsl` 直接按 `sd.uv` 采样。源材质带平铺的法线（真实肤质常见
+            // `_BumpMap_ST = (80,80)`）照搬过去会被按 1× 采样 —— 细密皮肤纹理变成"鳄鱼皮"大花纹。
+            // 处理方式见 <see cref="ApplyNormalTilingWorkaround"/>：贴图照接（置空会让 null 被当成白色、
+            // 解出畸形法线导致整身过曝），但把主法线强度压到 0，细节交给支持平铺的 Details 模块。
             MapTexture("_BumpMap", "_NormalMap", "法线贴图");
             // lilToon 的法线贴图在 NonToon 里要接**两份**：
             //   · 主 `_NormalMap` —— 只影响 sd.N（toon 硬色阶下的明暗分界 / 高光），细密纹理基本看不出来；
@@ -652,6 +657,32 @@ namespace NonToonSwitcher
             var value = ShaderUtility.ReadSerializedInt(target, enable, 1);
             target.EnableKeyword(key + "_" + value);
             target.DisableKeyword(key + "_" + (value == 0 ? 1 : 0));
+        }
+
+        /// <summary>
+        /// NonToon 的主 `_NormalMap` **不乘 `_NormalMap_ST`**（属性声明里没有 `SC_ScaleOffset`，
+        /// `birp.hlsl` 直接按 `sd.uv` 采样）。源材质用平铺法线时（真实肤质常见 `_BumpMap_ST = (80,80)`），
+        /// 照搬会被按 1× 采样 —— 细密的皮肤纹理被放大成大花纹，也就是用户说的"鳄鱼皮"。
+        ///
+        /// 处理：**贴图照接、只把主法线强度压到 0**。
+        /// · 不能把 `_NormalMap` 置空：null 会被当成白色，解包出畸形法线，整身直接过曝（实测）。
+        /// · 细节交给 Details 模块：它的 UV 会乘 `_Detail0Texture_ST`（转换器已把 `_BumpMap_ST` 抄过去），
+        ///   平铺有效，观感与 lilToon 一致（80× 的细密纹理本来就被 mip 抹平，几乎看不出来）。
+        /// </summary>
+        public static void ApplyNormalTilingWorkaround(Material source, Material target, ConversionLog log)
+        {
+            if (!ShaderUtility.HasProperty(source, "_BumpMap")) return;
+            if (source.GetTexture("_BumpMap") == null) return;
+
+            var scale = source.GetTextureScale("_BumpMap");
+            var offset = source.GetTextureOffset("_BumpMap");
+            if (scale == Vector2.one && offset == Vector2.zero) return;
+            if (!ShaderUtility.HasProperty(target, "_NormalScale")) return;
+
+            ShaderUtility.SetFloatValue(target, "_NormalScale", 0f);
+            log.Unsupported("法线贴图的平铺（_BumpMap_ST = " + scale + "）在 NonToon 的主 `_NormalMap` 上不生效" +
+                            "（shader 不乘 ST，会按 1× 采样），照搬会把细密皮肤纹理放大成「鳄鱼皮」。" +
+                            "已把主法线强度置 0，细节改由 Details 模块（支持平铺）承担。");
         }
 
         private static void MapTexture(string from, string to, string note, string unsupportedNote = null)        {

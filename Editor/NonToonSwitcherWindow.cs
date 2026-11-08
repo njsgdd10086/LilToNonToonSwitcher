@@ -269,6 +269,37 @@ namespace NonToonSwitcher
             }
             EditorGUILayout.EndHorizontal();
 
+            // ---- 转换前：合并 lilToon 的多层主色 ----
+            // NonToon 只有一层主色，lilToon 的 2、3 层主色转换后会被丢弃；先烘焙把它们压进 _MainTex。
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("转换前：合并 lilToon 的多层主色（2nd / 3rd）", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "NonToon 只有一层主色，lilToon 的第 2 / 第 3 层主色会在转换时被丢弃。\n" +
+                "先点「一键烘焙」：用 lilToon 自己的烘焙算法把主色 / HSVG / 渐变 / 2、3 层合并进 _MainTex，转换后颜色才完整。\n" +
+                "烘焙会清空这些属性（与 lilToon 行为一致），原值存进备份，可随时「一键恢复」。",
+                MessageType.Info);
+
+            using (new EditorGUI.DisabledScope(!hasSelection))
+            {
+                if (GUILayout.Button("① 一键烘焙所有 lilToon 材质（合并 2/3 主色）", GUILayout.Height(26f)))
+                {
+                    NonToonSwitcherMenu.BakeSelectionWithConfirm();
+                    GUI.FocusControl(null);
+                }
+            }
+
+            var backupCount = LilToonBakeUtility.BackupCount;
+            using (new EditorGUI.DisabledScope(backupCount == 0))
+            {
+                if (GUILayout.Button(backupCount > 0
+                        ? "② 一键恢复烘焙前的材质（备份 " + backupCount + " 个）"
+                        : "② 一键恢复烘焙前的材质（暂无备份）", GUILayout.Height(24f)))
+                {
+                    NonToonSwitcherMenu.RestoreBakedWithConfirm();
+                    GUI.FocusControl(null);
+                }
+            }
+
             if (!hasSelection)
                 EditorGUILayout.HelpBox("还没有选中任何对象。", MessageType.Warning);
 

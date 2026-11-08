@@ -127,9 +127,47 @@ namespace NonToonSwitcher
         }
 
         /// <summary>
-        /// 转换前体检：**只读**扫描，不修改任何东西。返回「再怎么调材质也救不回来」的两类问题
-        /// （渲染器没勾接受阴影 / 材质渲染队列进了透明通道）。两类都表现为"某个部位在阴影里不变暗"，
-        /// 而看 shader、色带、遮罩都查不出来，所以放在转换动手之前先报。
+        /// 材质层面的另一个问题：lilToon 启用了第 2 / 第 3 层主色。
+        /// NonToon 只有一层主色，这些层转换后会**整层丢失**（花纹 / 刘海阴影 / 腮红这类细节会没），
+        /// 而且不丢在这里的日志里 —— 所以转换前就要提醒。
+        /// 解决办法是先「一键烘焙 lilToon 多层主色」，把 2、3 层合进 `_MainTex` 再转换。
+        /// </summary>
+        private static void CheckMultiLayerMainColor(List<Renderer> renderers, List<string> warnings)
+        {
+            if (renderers == null) return;
+            var found = new List<string>();
+            var seen = new List<Material>();
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null) continue;
+                foreach (var material in renderer.sharedMaterials)
+                {
+                    if (material == null || seen.Contains(material)) continue;
+                    seen.Add(material);
+                    if (material.shader == null || !ShaderUtility.IsLilToon(material.shader)) continue;
+
+                    var use2 = ShaderUtility.HasProperty(material, "_UseMain2ndTex") && material.GetFloat("_UseMain2ndTex") != 0f;
+                    var use3 = ShaderUtility.HasProperty(material, "_UseMain3rdTex") && material.GetFloat("_UseMain3rdTex") != 0f;
+                    if (!use2 && !use3) continue;
+
+                    var layers = use2 && use3 ? "2nd + 3rd" : (use2 ? "2nd" : "3rd");
+                    found.Add(material.name + "（" + layers + "，用于 " + renderer.gameObject.name + "）");
+                }
+            }
+            if (found.Count == 0) return;
+
+            warnings.Add("有 " + found.Count + " 个 lilToon 材质启用了第 2 / 第 3 层主色。" +
+                         "NonToon 只有一层主色，这些层转换后会「整层丢失」（花纹 / 刘海阴影 / 腮红这类细节会消失，" +
+                         "整体变平），而且不会写进转换日志。\n" +
+                         "建议先点「Tools → LilToNonToon Switcher → 一键烘焙 lilToon 多层主色（合并 2/3 层）」，" +
+                         "把它们合进 _MainTex 之后「再转换」。" +
+                         "涉及：" + string.Join("、", found.ToArray()));
+        }
+
+        /// <summary>
+        /// 转换前体检：**只读**扫描，不修改任何东西。返回「再怎么调材质也救不回来」的问题
+        /// （渲染器没勾接受阴影 / 材质渲染队列进了透明通道 / 启用了 2、3 层主色），
+        /// 看 shader、色带、遮罩都查不出来，所以放在转换动手之前先报。
         /// </summary>
         public static List<string> PreflightScan(GameObject[] targets, bool includeInactive)
         {
@@ -139,6 +177,7 @@ namespace NonToonSwitcher
             foreach (var target in targets) CollectRenderers(target, includeInactive, renderers);
             CheckRendererShadowFlags(renderers, warnings);
             CheckTransparentRenderQueue(renderers, warnings);
+            CheckMultiLayerMainColor(renderers, warnings);
             return warnings;
         }
 
@@ -575,6 +614,10 @@ namespace NonToonSwitcher
                 }
             }
             NonToonSurfaceCompatibility.ApplyMatCaps(source, target, log);
+
+            // 平铺法线的兼容处理（NonToon 主 _NormalMap 不乘 ST，见方法注释）。放在最后，
+            // 免得被 _BumpScale → _NormalScale 的映射覆盖。
+            NonToonPropertyMap.ApplyNormalTilingWorkaround(source, target, log);
         }
 
         private static bool IsTouchedByMap(string propertyName)
@@ -949,12 +992,24 @@ namespace NonToonSwitcher
                 if (settings.LogToConsole) Debug.LogWarning(BuildPreflightText(preflight));
 
                 // 弹窗是最后一道保险（控制台很容易被忽略）。批处理 / CI 下不弹，免得卡住自动化。
+                // 两个按钮：继续转换 / 停止转换。**点右上角的叉也按"停止"处理** ——
+                // 以前只有一个按钮，叉掉和确认都等于照常转换，用户想先处理问题也没有退路。
                 if (!Application.isBatchMode)
                 {
-                    EditorUtility.DisplayDialog("⚠ 转换前警告（转换仍会照常进行）",
+                    var proceed = EditorUtility.DisplayDialog(
+                        "⚠ 转换前警告（尚未开始转换）",
                         BuildPreflightPlainText(preflight) +
-                        "\n\n上面这些问题转换器不会替你改，需要手动处理。详情见 Console。",
-                        "知道了，继续转换");
+                        "\n\n上面这些问题转换器不会替你改，需要手动处理。详情见 Console。\n\n" +
+                        "「继续转换」= 忽略这些提示，照常转换；\n「停止转换」= 先不转，去处理问题（不会修改任何东西）。",
+                        "继续转换", "停止转换");
+
+                    if (!proceed)
+                    {
+                        result.Cancelled = true;
+                        result.Warnings.Add("已停止转换（转换前警告里的问题未处理）。没有修改任何材质或对象。");
+                        if (settings.LogToConsole) Debug.Log(result.BuildText());
+                        return result;
+                    }
                 }
             }
 

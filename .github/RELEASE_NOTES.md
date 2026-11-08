@@ -1,3 +1,39 @@
+**LilToNonToon Switcher 1.4.2** —— 修掉「真实肤质」皮肤的鳄鱼皮纹理（法线平铺）、新增多层主色一键烘焙 / 恢复、转换前警告可停止
+
+## [1.4.2] - 2026-11-08
+
+### 修复
+
+- **真实肤质材质的「鳄鱼皮」** ✅ —— 装了「真实肤质」类材质后，转换出来的皮肤出现鳞片状纹理。根因不在法线本身，
+  而在**平铺**：NonToon 的主 `_NormalMap` 不乘 `_NormalMap_ST`（`NonToon_properties.hlsl` 里没有 `SC_ScaleOffset`，
+  `birp.hlsl` 直接按 `sd.uv` 采样）。这类材质靠 `_BumpMap_ST = (80,80)` 把皮肤法线平铺 80 次，在 lilToon 里是
+  细密到几乎看不见的纹理（实测 `_BumpScale` 1 vs 0 只差 0.08% 像素），照搬后被按 **1×** 采样 → 放大成鳄鱼皮（13.5% 像素）。
+  现在检测到 `_BumpMap_ST` 非单位值时：**贴图照接、`_NormalScale` 置 0**，细节交给 Details 模块（它的 UV 乘
+  `_Detail0Texture_ST`，平铺有效）。`_BumpMap_ST = (1,1)` 的普通材质不受影响。
+  ⚠ 不能把 `_NormalMap` 置空：null 会被当作白色纹理、解出畸形法线，整身直接过曝。
+
+### 新增
+
+- **一键烘焙 lilToon 多层主色（2nd / 3rd）+ 一键恢复** ✅ —— NonToon 只有一层主色，lilToon 的第 2 / 第 3 层主色
+  （`_Color2nd/3rd`、`_Main2ndTex/3rd`、混合遮罩、混合模式、贴图 UV）转换后会整层丢失（花纹 / 刘海阴影 / 腮红变平）。
+  现在可以先**合并进 `_MainTex`** 再转换：
+  - 入口：`Tools/LilToNonToon Switcher/一键烘焙 lilToon 多层主色（合并 2/3 层）`、
+    `GameObject/LilToNonToon/烘焙 lilToon 多层主色（2/3 层）`，以及设置窗口里的两个按钮。
+  - 烘焙**用的是 lilToon 自己的算法**（`Hidden/ltsother_baker` 着色器 + `lilToonInspector.RunBake`，走反射调用）。
+    没有直接调它的 `TextureBake`，因为它保存时会 `EditorUtility.SaveFilePanel` 弹框，每个材质弹一次，批量不可用 ——
+    这里只把「保存」换成静默写 `<材质名>_baked.png`。
+  - 烘焙后会清空 `_Color` / `_MainTexHSVG` / 渐变 / 2、3 层开关与贴图（与 lilToon 行为一致），原值快照进
+    `<输出文件夹>/_LilToonBakeBackup.json`，可随时「一键恢复」。恢复失败的条目会留在备份里，恢复后还会逐项复核。
+  - 恢复**不会**自动回滚已转换的 NonToon 材质 —— 日志会点名它们，提示「重新执行一次转换」。
+
+- **转换前体检新增第三项：多层主色** ✅ —— lilToon 材质启用第 2 / 第 3 层主色时，与「接受阴影」「渲染队列」
+  共用同一个警告弹窗并点名具体材质，建议先烘焙再转换。
+
+### 变更
+
+- **转换前警告改成两个按钮**：「继续转换」/「停止转换」，点右上角的叉也按「停止」处理。
+  选「停止」会立刻中止、不修改任何东西，也不会再弹二次确认框（一次点击就结束，只留一行 Console 日志）。
+
 **LilToNonToon Switcher 1.4.1** —— 新增「转换前体检」：渲染队列落进透明通道、渲染器没勾「接受阴影」，都会在转换动手前醒目报出
 
 ## [1.4.1] - 2026-11-01

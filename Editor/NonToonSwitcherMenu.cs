@@ -72,6 +72,93 @@ namespace NonToonSwitcher
             NonToonConverterMenu.Run(BuildRequestFromSettings(settings, true));
         }
 
+        // ------------------------------------------------------------------ 多层主色烘焙（2nd / 3rd）
+        //
+        // NonToon 只有一层主色，lilToon 的 2、3 层主色会在转换时被丢弃。烘焙把 _Color / HSVG / 渐变 /
+        // 2、3 层按 lilToon 自己的算法合进 _MainTex，转换后颜色才完整。烘焙前会存备份，可一键还原。
+
+        [MenuItem("Tools/LilToNonToon Switcher/一键烘焙 lilToon 多层主色（合并 2/3 层）", false, 102)]
+        private static void BakeFromToolsMenu()
+        {
+            BakeSelectionWithConfirm();
+        }
+
+        [MenuItem("Tools/LilToNonToon Switcher/一键恢复烘焙前的 lilToon 材质", false, 103)]
+        private static void RestoreFromToolsMenu()
+        {
+            RestoreBakedWithConfirm();
+        }
+
+        [MenuItem("GameObject/LilToNonToon/烘焙 lilToon 多层主色（2/3 层）", false, Priority + 4)]
+        private static void BakeFromContextMenu()
+        {
+            BakeSelectionWithConfirm();
+        }
+
+        [MenuItem("GameObject/LilToNonToon/恢复烘焙前的材质", false, Priority + 5)]
+        private static void RestoreFromContextMenu()
+        {
+            RestoreBakedWithConfirm();
+        }
+
+        /// <summary>窗口与菜单共用：确认后烘焙选中对象上的全部 lilToon 材质。</summary>
+        public static void BakeSelectionWithConfirm()
+        {
+            var selection = Selection.gameObjects;
+            if (selection == null || selection.Length == 0)
+            {
+                EditorUtility.DisplayDialog("一键烘焙 lilToon 多层主色",
+                    "请先在 Hierarchy 里选中要烘焙的 avatar / 对象。", "知道了");
+                return;
+            }
+
+            string reason;
+            if (!LilToonBakeUtility.IsBakerAvailable(out reason))
+            {
+                EditorUtility.DisplayDialog("一键烘焙 lilToon 多层主色", reason, "知道了");
+                return;
+            }
+
+            if (!EditorUtility.DisplayDialog("一键烘焙 lilToon 多层主色",
+                    "会把选中对象里所有 lilToon 材质的这几项合并进 _MainTex：\n" +
+                    "  · 主色 _Color、色调校正 _MainTexHSVG、渐变\n" +
+                    "  · 第 2 / 第 3 层主色（含混合遮罩、混合模式、贴图 UV）\n\n" +
+                    "烘焙后这些属性会被清空（和 lilToon 自己的烘焙行为一致），" +
+                    "原值已存进备份，可用「一键恢复」还原。\n\n继续吗？",
+                    "开始烘焙", "取消")) return;
+
+            var summary = LilToonBakeUtility.BakeSelection(true);
+            if (NonToonSwitcherSettings.instance.LogToConsole) Debug.Log(summary.BuildText());
+            EditorUtility.DisplayDialog("一键烘焙完成",
+                "成功 " + summary.Baked + " 个，跳过 " + summary.Skipped + " 个，失败 " + summary.Failed + " 个。" +
+                (summary.Baked > 0 ? "\n\n烘焙贴图已保存在各材质旁边（<材质名>_baked.png）。" : "") +
+                "\n\n详细清单见 Console。", "好");
+        }
+
+        /// <summary>窗口与菜单共用：把上一次烘焙改过的材质还原。</summary>
+        public static void RestoreBakedWithConfirm()
+        {
+            var count = LilToonBakeUtility.BackupCount;
+            if (count == 0)
+            {
+                EditorUtility.DisplayDialog("一键恢复烘焙前材质",
+                    "没有找到烘焙备份（" + LilToonBakeUtility.BackupFileName + "），没有可恢复的内容。", "知道了");
+                return;
+            }
+
+            if (!EditorUtility.DisplayDialog("一键恢复烘焙前材质",
+                    "把备份里 " + count + " 个材质还原成烘焙前的样子：\n" +
+                    "  · _MainTex 换回原贴图\n  · 主色 / HSVG / 渐变 / 2、3 层主色全部恢复\n\n" +
+                    "烘焙生成的 <材质名>_baked.png 不会删除（可能已被别处引用）。\n\n继续吗？",
+                    "开始恢复", "取消")) return;
+
+            var summary = LilToonBakeUtility.Restore();
+            if (NonToonSwitcherSettings.instance.LogToConsole) Debug.Log(summary.BuildText());
+            EditorUtility.DisplayDialog("一键恢复完成",
+                "已还原 " + summary.Restored + " 个材质，跳过 " + summary.Skipped + " 个，失败 " + summary.Failed + " 个。" +
+                "\n\n详细清单见 Console。", "好");
+        }
+
         [MenuItem("Tools/LilToNonToon Switcher/设置与转换窗口", false, 101)]
         private static void OpenWindow()
         {
@@ -310,6 +397,10 @@ namespace NonToonSwitcher
 
             var result = NonToonConverter.Convert(request);
             NonToonSwitcherWindow.LastResult = result;
+
+            // 用户在「转换前警告」里点了「停止转换」：一次点击就结束 ——
+            // 不再弹"已停止转换"的确认框，也不重复写日志（Convert() 里已经按 LogToConsole 打过一次结果）。
+            if (result.Cancelled) return;
 
             if (!result.Success)
             {

@@ -102,6 +102,9 @@ namespace NonToonSwitcher
         /// <summary>true 表示这次把渲染器上的材质直接换成了 NonToon（没有切换开关）。</summary>
         public bool ReplacedOnRenderers;
 
+        /// <summary>true 表示用户在「转换前警告」里选了停止，**什么都没改**。</summary>
+        public bool Cancelled;
+
         /// <summary>「复制一份再换」时生成的副本对象（形如 <名字>_nontoon）。</summary>
         public readonly List<string> DuplicatedObjects = new List<string>();
 
@@ -114,6 +117,7 @@ namespace NonToonSwitcher
         {
             var sb = new StringBuilder();
             sb.AppendLine("LilToNonToon Switcher");
+            if (Cancelled) sb.AppendLine("状态        : 已停止（未做任何修改）");
             sb.AppendLine("输出文件夹  : " + OutputFolder);
             sb.AppendLine("已转换材质  : " + Logs.Count + " 个");
             if (SwitchObject != null)
