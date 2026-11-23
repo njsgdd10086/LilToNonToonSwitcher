@@ -41,8 +41,9 @@ namespace NonToonSwitcher
         /// <summary>
         /// Reads a texture as pixels. Textures without Read/Write enabled are copied through a temporary
         /// render texture, so the source texture never has to be modified.
+        /// `maxSize` 只在**源贴图比它更大**时按比例缩小；传 <see cref="int.MaxValue"/> 表示严格保持源分辨率。
         /// </summary>
-        public static bool TryReadPixels(Texture texture, out Color[] pixels, out int width, out int height, ConversionLog log, string what)
+        public static bool TryReadPixels(Texture texture, out Color[] pixels, out int width, out int height, ConversionLog log, string what, int maxSize = 4096)
         {
             pixels = null;
             width = 0;
@@ -69,10 +70,10 @@ namespace NonToonSwitcher
             {
                 // 保持源贴图的**真实尺寸/长宽比**。以前这里用 NextPowerOfTwo 把尺寸向上取整
                 //（例如 2048x1943 → 2048x2048），RenderTexture 会把贴图拉伸，UV 全错位 ——
-                // 表现就是"衣服上的纹理没了 / 糊了"。只在超过上限时按比例缩小。
-                const int maxSize = 4096;
+                // 表现就是"衣服上的纹理没了 / 糊了"。只在超过上限时按比例缩小；
+                // 传 int.MaxValue 时严格等于源分辨率（UV 变换烘焙要求"不改分辨率"）。
                 var longest = Mathf.Max(texture.width, texture.height);
-                var scale = longest > maxSize ? maxSize / (float)longest : 1f;
+                var scale = maxSize > 0 && longest > maxSize ? maxSize / (float)longest : 1f;
                 width = Mathf.Max(4, Mathf.RoundToInt(texture.width * scale));
                 height = Mathf.Max(4, Mathf.RoundToInt(texture.height * scale));
                 // 用 sRGB 的 RenderTexture + 非 linear 的临时贴图，拿到的才是"贴图里存的那份数值"（sRGB 编码），
@@ -121,6 +122,171 @@ namespace NonToonSwitcher
             {
                 UnityEngine.Object.DestroyImmediate(texture);
             }
+        }
+
+        // ------------------------------------------------------------------ 主贴图的 UV 变换（平铺 / 偏移）
+
+        /// <summary>
+        /// 把 lilToon 主贴图的 UV 变换烘进 `_BaseTexture`。
+        ///
+        /// **为什么必须烘**：NonToon 的 `_BaseTexture` 不乘 `_BaseTexture_ST`
+        /// （`NonToon_properties.hlsl` 里没有 `SC_ScaleOffset`，`birp.hlsl` 直接 `SCSample(_BaseTexture, …, sd.uv)`），
+        /// 所以源材质设了非单位的 Tiling/Offset 时，转换后会被按 1×/0 采样 ——
+        /// 采到的是贴图里完全不同的区域，花纹直接"消失"成一片纯色。
+        /// 实测（Shinano 蕾丝内衣）：`_MainTex_ST = (1.70, 1.70) / (-0.71, 0)`，
+        /// lilToon 是蕾丝花纹，NonToon 变成灰白色块。
+        ///
+        /// 做法：生成 `out(u,v) = src(u·sx+ox, v·sy+oy)` 的贴图（双线性 + wrap），
+        /// 因为着色器原本就是按这个映射采样，所以 **采样结果完全等价**。
+        /// 生成后把 `_BaseTexture_ST` 归零，避免以后 NonToon 支持 ST 时二次生效。
+        /// </summary>
+        public static bool ApplyTextureTransform(Material lilToonMaterial, Material nonToonMaterial, string folder,
+            ConversionLog log)
+        {
+            if (lilToonMaterial == null || nonToonMaterial == null) return false;
+            if (!ShaderUtility.HasProperty(lilToonMaterial, "_MainTex")) return false;
+            if (!ShaderUtility.HasProperty(nonToonMaterial, "_BaseTexture")) return false;
+
+            var scale = lilToonMaterial.GetTextureScale("_MainTex");
+            var offset = lilToonMaterial.GetTextureOffset("_MainTex");
+            if (scale == Vector2.one && offset == Vector2.zero) return false;
+
+            var current = nonToonMaterial.GetTexture("_BaseTexture") as Texture2D;
+            if (current == null)
+            {
+                // 没有主贴图（lilToon 用默认白贴图）时没有可变换的内容。
+                return false;
+            }
+
+            Color[] sourcePixels;
+            int sourceWidth, sourceHeight;
+            // **严格按源分辨率读取**（int.MaxValue = 不缩放）。转换要忠实 ——
+            // 这里曾经为了省内存压到 2048/4096，等于偷偷改分辨率，放大看必然发糊。
+            if (!TryReadPixels(current, out sourcePixels, out sourceWidth, out sourceHeight, log,
+                    "主贴图（UV 变换烘焙）", int.MaxValue))
+                return false;
+
+            var width = sourceWidth;
+            var height = sourceHeight;
+
+            // 采样是**可分离**的：u 只跟 x 有关、v 只跟 y 有关。
+            // 先把每列的 (x0, x1, tx) 和每行的 (y0, y1, ty) 算好，内层循环只做 4 次取色 + 双线性插值。
+            var x0s = new int[width];
+            var x1s = new int[width];
+            var txs = new float[width];
+            for (var x = 0; x < width; x++)
+            {
+                var u = (x + 0.5f) / width * scale.x + offset.x;
+                var fx = u * sourceWidth - 0.5f;
+                var floor = Mathf.FloorToInt(fx);
+                txs[x] = fx - floor;
+                x0s[x] = Wrap(floor, sourceWidth);
+                x1s[x] = Wrap(floor + 1, sourceWidth);
+            }
+
+            var y0s = new int[height];
+            var y1s = new int[height];
+            var tys = new float[height];
+            for (var y = 0; y < height; y++)
+            {
+                var v = (y + 0.5f) / height * scale.y + offset.y;
+                var fy = v * sourceHeight - 0.5f;
+                var floor = Mathf.FloorToInt(fy);
+                tys[y] = fy - floor;
+                y0s[y] = Wrap(floor, sourceHeight);
+                y1s[y] = Wrap(floor + 1, sourceHeight);
+            }
+
+            Color[] output;
+            try
+            {
+                output = new Color[width * height];
+            }
+            catch (Exception exception)
+            {
+                // 忠实优先：宁可报错保留原贴图，也**不要**偷偷降分辨率去凑内存。
+                log.Warn("主贴图 UV 变换烘焙需要 " + width + "x" + height + " 的像素缓冲，内存不足（" +
+                         exception.Message + "）。已保留原贴图 —— 花纹位置会错，请手动处理该材质。");
+                return false;
+            }
+
+            for (var y = 0; y < height; y++)
+            {
+                var row0 = y0s[y] * sourceWidth;
+                var row1 = y1s[y] * sourceWidth;
+                var ty = tys[y];
+                var rowOffset = y * width;
+                for (var x = 0; x < width; x++)
+                {
+                    var i0 = row0 + x0s[x];
+                    var i1 = row0 + x1s[x];
+                    var j0 = row1 + x0s[x];
+                    var j1 = row1 + x1s[x];
+                    var tx = txs[x];
+                    var top = Color.Lerp(sourcePixels[i0], sourcePixels[i1], tx);
+                    var bottom = Color.Lerp(sourcePixels[j0], sourcePixels[j1], tx);
+                    output[rowOffset + x] = Color.Lerp(top, bottom, ty);
+                }
+            }
+
+            var fileName = ShaderUtility.SanitizeFileName(nonToonMaterial.name) + "_BaseUV.png";
+            var path = folder.TrimEnd('/') + "/" + fileName;
+            try
+            {
+                WritePng(output, width, height, path, false, true);
+                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            }
+            catch (Exception exception)
+            {
+                log.Warn("主贴图 UV 变换烘焙写盘失败（" + width + "x" + height + "：" + exception.Message +
+                         "），已保留原贴图（花纹可能错位）。");
+                return false;
+            }
+
+            var asset = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            if (asset == null)
+            {
+                log.Warn("主贴图 UV 变换烘焙失败（路径：" + path + "），已保留原贴图（花纹可能错位）。");
+                return false;
+            }
+
+            // 沿用原贴图的导入设置（sRGB / alpha / wrap 等）。
+            var sourcePath = AssetDatabase.GetAssetPath(current);
+            if (AssetImporter.GetAtPath(path) is TextureImporter importer &&
+                !string.IsNullOrEmpty(sourcePath) &&
+                AssetImporter.GetAtPath(sourcePath) is TextureImporter originalImporter)
+            {
+                importer.sRGBTexture = originalImporter.sRGBTexture;
+                importer.alphaSource = originalImporter.alphaSource;
+                importer.alphaIsTransparency = originalImporter.alphaIsTransparency;
+                importer.mipmapEnabled = originalImporter.mipmapEnabled;
+                importer.streamingMipmaps = originalImporter.streamingMipmaps;
+                importer.maxTextureSize = originalImporter.maxTextureSize;
+                // NPOT 缩放必须跟着源贴图：默认值是 ToNearest，会把 5000x1000 缩成 4096x1024 ——
+                // 那就等于**偷偷改了分辨率**（实测踩到：输出尺寸对不上源贴图）。
+                importer.npotScale = originalImporter.npotScale;
+                importer.textureCompression = originalImporter.textureCompression;
+                importer.wrapMode = originalImporter.wrapMode;
+                importer.filterMode = originalImporter.filterMode;
+                importer.anisoLevel = originalImporter.anisoLevel;
+                importer.SaveAndReimport();
+            }
+
+            asset = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            nonToonMaterial.SetTexture("_BaseTexture", asset);
+            nonToonMaterial.SetTextureScale("_BaseTexture", Vector2.one);
+            nonToonMaterial.SetTextureOffset("_BaseTexture", Vector2.zero);
+
+            log.Mapped("_MainTex 的 UV 变换 Tiling " + scale + " / Offset " + offset,
+                "_BaseTexture 已重采样并烘进 " + fileName + "（NonToon 不乘 _BaseTexture_ST），ST 归零");
+            return true;
+        }
+
+        private static int Wrap(int value, int size)
+        {
+            if (size <= 0) return 0;
+            var result = value % size;
+            return result < 0 ? result + size : result;
         }
 
         // ------------------------------------------------------------------ base texture with the main colour baked in
@@ -257,7 +423,8 @@ namespace NonToonSwitcher
                 for (var i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
                 log.Mapped("_MainTex 未指定（lilToon 用 shader 默认白贴图）", "以白底贴图烘焙主色 / 透明遮罩");
             }
-            else if (!TryReadPixels(source, out pixels, out width, out height, log, "the base texture"))
+            // 忠实转换：**严格保持源贴图分辨率**（int.MaxValue = 不按 4096 缩小）。
+            else if (!TryReadPixels(source, out pixels, out width, out height, log, "the base texture", int.MaxValue))
             {
                 log.Warn("主色 / 色调校正 / 透明遮罩需要烘焙，但基础贴图读取失败，这些设置没有烘焙进去。" +
                          "请手动设置转换后材质的颜色，或在贴图上勾选 Read/Write。");
@@ -413,6 +580,8 @@ namespace NonToonSwitcher
                 importer.mipmapEnabled = originalImporter.mipmapEnabled;
                 importer.streamingMipmaps = originalImporter.streamingMipmaps;
                 importer.maxTextureSize = originalImporter.maxTextureSize;
+                // 同上：NPOT 缩放不继承的话，非 2 次幂的贴图会被 Unity 悄悄缩到最近的幂。
+                importer.npotScale = originalImporter.npotScale;
                 importer.textureCompression = originalImporter.textureCompression;
                 importer.wrapMode = originalImporter.wrapMode;
                 importer.filterMode = originalImporter.filterMode;
@@ -576,6 +745,17 @@ namespace NonToonSwitcher
                 gradients.Add(BuildShadeGradient(lilToonMaterial, log));
                 used.Add("_ShadowColor");
             }
+            else
+            {
+                // `_UseShadow = 0` 的材质以前直接跳过 ⇒ gradients 为空 ⇒ `_SharedGradients` 保持 null。
+                // 那种情况下 NonToon 拿到的是「白→白」默认渐变，明暗系数恒为 1：**完全不响应光照**，
+                // 光越亮越白（实测：曝光/聚光灯场景里，同一球体 lil 仍是深色、NonToon 直接白掉）。
+                // lilToon 在这种情况下走 `fd.col.rgb *= fd.lightColor`（lil_common_frag.hlsl:1134 的 else 分支）
+                // —— 亮度线性跟随光照。所以补一条黑→白的线性坡度。
+                shadeIndex = gradients.Count;
+                gradients.Add(BuildLinearShadeGradient());
+                used.Add("_UseShadow=0（线性光照坡度）");
+            }
 
             if (ShaderUtility.HasProperty(lilToonMaterial, "_UseRimShade") &&
                 lilToonMaterial.GetFloat("_UseRimShade") != 0f)
@@ -611,6 +791,19 @@ namespace NonToonSwitcher
             log.Mapped(string.Join(" + ", used) + "，共 " + gradients.Count + " 层",
                 "_SharedGradients（生成的 " + GradientsExtension + "）");
             return asset;
+        }
+
+        /// <summary>
+        /// `_UseShadow = 0` 用的坡度：黑 → 白，线性。
+        /// 对应 lilToon 的 `fd.col.rgb *= fd.lightColor`（没有 toon 阴影，亮度线性跟光照走）。
+        /// </summary>
+        private static Gradient BuildLinearShadeGradient()
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[] { new GradientColorKey(Color.black, 0f), new GradientColorKey(Color.white, 1f) },
+                new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) });
+            return gradient;
         }
 
         /// <summary>

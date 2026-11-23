@@ -43,6 +43,27 @@ python scripts/validate_package.py --root .
 3. 按提示把该材质的 Render Queue 手动改到 `≤2500`（Shader Core 下拉框选 AlphaTest=2450，或直接填 2500），
    再到 `lilAvatarUtils → 光照 → 在阴影中` 确认它与脸、头发一样被压暗。
 
+## 关闭阴影（`_UseShadow = 0`）的材质回归
+
+背景：lilToon 在 `_UseShadow = 0` 时走 `col *= lightColor`（无 toon 阴影、亮度跟光照线性）。若转换后
+`_SharedGradients` 为空，NonToon 会用默认「白→白」渐变，完全不响应光照，表现为**一打光就发白**。
+
+1. 选一个 `_UseShadow = 0` 的材质（例如只有 matcap 的皮革 / 金属球），执行转换。
+2. 检查结果材质 `_SharedGradients` **不为空**，对应的 `.scgradients.meta` 里是 **黑→白** 两个关键点。
+3. 光照对比：把场景主光强度调到 4（模拟过度曝光），材质应随光照明暗变化，**不应整块变白**；
+   与 lilToon 原材质的亮度差应在同一量级。
+4. 有阴影的普通材质（`_UseShadow = 1`）回归：仍按 `_ShadowColor` / `_ShadowBorder` / `_ShadowBlur` 烘焙，行为不变。
+
+## 主贴图 UV 变换（Tiling / Offset）回归
+
+背景：NonToon 的 `_BaseTexture` 不乘 `_BaseTexture_ST`，源材质用了非单位 Tiling/Offset 时会被按 1×/0 采样，
+花纹整片错位成纯色（蕾丝内衣就是这种情况）。转换器现在会把它重采样烘进 `<材质名>_BaseUV.png`。
+
+1. 选一个 `_MainTex` 的 Tiling 不是 (1,1) 的材质（材质面板 → 主贴图 → Tiling/Offset），执行转换。
+2. 检查结果材质：`_BaseTexture` 应指向 `<材质名>_BaseUV.png`，且 `_BaseTexture_ST` 为 (1,1)/(0,0)。
+3. 渲染对比：花纹的位置、缩放应与 lilToon 一致（蕾丝、印花这类高频图案最容易看出来）。
+4. 普通材质（Tiling 1,1）回归：`_BaseTexture` 不应多出 `_BaseUV.png`，行为与以前一致。
+
 ## 平铺法线（真实肤质材质）回归
 
 背景：NonToon 的主 `_NormalMap` 不乘 `_NormalMap_ST`，源材质用平铺法线（如 `_BumpMap_ST = 80,80`）时

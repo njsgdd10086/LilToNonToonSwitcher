@@ -410,6 +410,11 @@ namespace NonToonSwitcher
                 }
             }
 
+            // 主贴图的 Tiling / Offset：NonToon 的 `_BaseTexture` 不乘 `_BaseTexture_ST`，
+            // 源材质设了非单位值时会被按 1×/0 采样（花纹错位成一片纯色）。这里重采样进贴图。
+            // 放在基础贴图烘焙**之后**：烘焙可能生成了新的 `_Base.png`，要对最终那张做变换。
+            NonToonTextureBaker.ApplyTextureTransform(source, target, log.Folder, log);
+
 
             EditorUtility.SetDirty(target);
             ShaderUtility.PersistIntegers(target);
